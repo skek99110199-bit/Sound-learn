@@ -330,3 +330,19 @@ P = 69 + 12 × log2(f / 440)
 ---
 
 > **Copyright 2026. 김우영(2271085) all rights reserved.** > 본 문서는 프로젝트 '널 위한 멜로디'의 기술 설계를 포함하고 있습니다.
+
+
+
+
+
+### 🛠️ [추가/수정] 백엔드 핵심 메소드 보완
+| 구분 | 메소드명 | 변경/추가 사유 |
+| :--- | :--- | :--- |
+| 전처리 | `apply_loudness_normalization()` | **[추가]** 입력 볼륨 불균형으로 인한 분석 오류 방지 |
+| 동기화 | `sync_start_threshold()` | **[추가]** 무음 구간을 제외하고 실제 가창 시작점 일치 시키기 |
+| 정밀도 | `calculate_cent_deviation()` | **[수정]** 반음 단위를 넘어 1/100 단위(Cent)로 정밀 오차 계산 |
+| 시각화 | `smooth_pitch_curve()` | **[추가]** 추출된 피치 데이터의 노이즈를 제거하여 부드러운 선으로 시각화 |
+
+### 🚀 차별화 포인트 (Future Roadmap)
+1. **Dynamic Feedback Loop**: 사용자가 많이 틀리는 구간을 AI가 파악하여 해당 부분만 집중 연습시키는 `generate_focus_session()` 메소드 구현.
+2. **Social Ranking System**: 사용자간 정확도 순위를 매기는 `calculate_global_ranking()`을 통해 커뮤니티 요소 강화.

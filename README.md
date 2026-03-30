@@ -231,3 +231,102 @@ P = 69 + 12 × log2(f / 440)
 # 👍 한 줄 요약
 
 노래를 데이터로 분석하고 시각화하며 AI가 개선 방향까지 제공하는 보컬 피드백 웹 서비스
+
+
+
+
+
+
+
+# 🎵 널 위한 멜로디 (Melody for You) - 상세 설계서
+
+**작성자:** 김우영 (2271085)  
+**소속:** 한성대학교 컴퓨터공학부 (Web & Mobile Software Track)
+
+---
+
+## 🏗️ 1. 시스템 아키텍처 및 데이터 흐름 (Data Pipeline)
+
+전체 서비스는 사용자의 음성을 수집하여 AI 분석 후 시각화하는 6단계 파이프라인으로 구성됩니다.
+
+1.  **Frontend** (`request_audio_stream`): 사용자 가창 시작 및 마이크 스트림 활성화.
+2.  **Frontend** (`export_to_wav`): 녹음 완료 후 오디오 데이터를 서버(FastAPI)로 전송.
+3.  **Backend** (`extract_pitch_crepe`): **CREPE** 모델을 통한 딥러닝 기반 정밀 음정 추출.
+4.  **Backend** (`apply_dtw_alignment`): **[핵심]** DTW 알고리즘으로 사용자 박자와 기준곡 마디 동기화.
+5.  **Backend** (`generate_ai_feedback`): GPT-4o 기반 개인화 보컬 리포트 및 피드백 생성.
+6.  **Frontend** (`render_piano_roll`): 분석 결과 및 피아노 롤 시각화 대시보드 출력.
+
+---
+
+## 🛠️ 2. 백엔드 메소드 명세 (Python / FastAPI)
+
+### [A] 음성 처리 및 특징 추출 (Pitch Engine)
+사용자의 아날로그 음성 신호를 디지털 분석 데이터로 변환합니다.
+
+| 메소드명 | 설명 | 비고 |
+| :--- | :--- | :--- |
+| `load_audio_stream()` | 업로드된 오디오 파일을 Numpy Array 형태로 로드 | librosa 활용 |
+| `preprocess_noise_reduction()` | 배경 노이즈를 제거하여 음정 추출 정확도 향상 | 전처리 단계 |
+| `extract_pitch_crepe()` | **CREPE** 모델을 사용하여 10ms 단위 주파수($f_0$) 추출 | Deep Learning |
+| `convert_hz_to_midi()` | 추출된 주파수($Hz$)를 MIDI 노트 번호로 변환 | $f \rightarrow$ Note |
+| `detect_vocal_range()` | 사용자의 최저/최고음을 계산하여 성종(음역대) 파악 | 개인화 데이터 |
+
+### [B] 비교 및 교정 로직 (Alignment & Scoring)
+박자 이탈을 허용하면서 순수 음정 실력을 평가하는 지능형 알고리즘입니다.
+
+| 메소드명 | 설명 | 핵심 기술 |
+| :--- | :--- | :--- |
+| `fetch_reference_midi()` | DB에서 곡의 기준 MIDI(정답) 데이터를 로드 | Reference Data |
+| `apply_dtw_alignment()` | **Dynamic Time Warping**을 적용해 박자 밀림/당김 보정 | **핵심 알고리즘** |
+| `calculate_accuracy_score()` | 보정된 데이터를 바탕으로 음정(Cents) 및 박자 점수화 | 정밀도 분석 |
+| `identify_error_segments()` | 음정 불안정이나 이탈이 심했던 특정 마디(Segment) 추출 | 구간 분석 |
+
+
+
+### [C] AI 리포트 생성 (Feedback Agent)
+수치 데이터를 기반으로 사용자 맞춤형 텍스트 조언을 생성합니다.
+
+| 메소드명 | 설명 | 비고 |
+| :--- | :--- | :--- |
+| `aggregate_vocal_data()` | 점수, 음역대, 이탈 구간 등을 LLM용 JSON으로 요약 | Data Mapping |
+| `generate_ai_feedback()` | **GPT-4o**를 통해 전문 보컬 트레이너 톤의 피드백 생성 | Prompt Eng. |
+| `suggest_matching_songs()` | 파악된 사용자 음역대에 최적화된 연습곡 추천 | 큐레이션 |
+
+---
+
+## 🎨 3. 프론트엔드 메소드 명세 (Next.js / TypeScript)
+
+### [A] 녹음 및 오디오 관리 (Recording Hook)
+웹 브라우저의 자원을 활용한 실시간 오디오 핸들링을 담당합니다.
+
+| 메소드명 | 설명 | 기술 스택 |
+| :--- | :--- | :--- |
+| `request_audio_stream()` | 브라우저 마이크 권한 요청 및 미디어 스트림 활성화 | Web Audio API |
+| `visualize_realtime_wave()` | 가창 중인 목소리를 실시간 파형(Waveform)으로 렌더링 | Canvas API |
+| `export_to_wav()` | 녹음 종료 후 분석용 고음질 WAV 포맷 인코딩 | Audio Export |
+| `upload_with_progress()` | 서버 전송 시 진행률(Progress) 시각화 | Axios/Fetch |
+
+### [B] 결과 시각화 (Visualization Component)
+사용자에게 분석 결과를 시각적으로 피드백하는 핵심 UI 컴포넌트입니다.
+
+| 메소드명 | 설명 | 비고 |
+| :--- | :--- | :--- |
+| `render_piano_roll()` | Canvas를 사용하여 가로(시간), 세로(음정) 격자 생성 | UI 프레임 |
+| `draw_reference_path()` | 정답 MIDI 데이터를 배경에 바(Bar) 형태로 표시 | 가이드라인 |
+| `overlay_user_pitch()` | 분석된 사용자 음정 궤적을 선 그래프로 겹쳐 출력 | 가창 궤적 |
+| `highlight_error_nodes()` | 음정 이탈 구간에 시각적 강조(빨간색 노드) 표시 | 오답 노트 |
+
+
+
+### [C] 상태 관리 및 유틸리티 (Global Store)
+전역 상태를 관리하고 사용자 편의 기능을 제공합니다.
+
+| 메소드명 | 설명 | 비고 |
+| :--- | :--- | :--- |
+| `store_analysis_result()` | 서버 응답 데이터를 전역 상태에 저장 및 관리 | Zustand / Recoil |
+| `capture_report_image()` | 분석 리포트 화면을 이미지 파일로 캡처 | SNS 공유용 |
+| `compare_session_history()` | 이전 세션과 현재 데이터를 비교하여 성장 곡선 생성 | 데이터 트래킹 |
+
+---
+
+> **Copyright 2026. 김우영(2271085) all rights reserved.** > 본 문서는 프로젝트 '널 위한 멜로디'의 기술 설계를 포함하고 있습니다.

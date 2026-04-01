@@ -3,7 +3,6 @@ from io import BytesIO
 from pathlib import Path
 
 import librosa
-import numpy as np
 import soundfile as sf
 from fastapi import APIRouter, HTTPException, UploadFile
 
@@ -17,7 +16,9 @@ router = APIRouter()
 
 @router.post("/upload")
 async def upload_audio(file: UploadFile):
-    # 확장자 검증
+    # 파일명 및 확장자 검증
+    if not file.filename:
+        raise HTTPException(status_code=422, detail="파일명이 없습니다.")
     suffix = Path(file.filename).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -33,12 +34,15 @@ async def upload_audio(file: UploadFile):
             detail="파일 크기가 50MB를 초과합니다.",
         )
 
-    # librosa로 로드 (원본 sr 먼저 확인, 이후 22050Hz로 리샘플링)
+    # librosa로 로드 (원본 sr 보존 후 22050Hz로 리샘플링)
     audio_bytes = BytesIO(content)
     y_original, original_sr = librosa.load(audio_bytes, sr=None, mono=True)
 
-    audio_bytes.seek(0)
-    y_normalized, _ = librosa.load(audio_bytes, sr=NORMALIZED_SR, mono=True)
+    y_normalized = (
+        librosa.resample(y_original, orig_sr=original_sr, target_sr=NORMALIZED_SR)
+        if original_sr != NORMALIZED_SR
+        else y_original
+    )
 
     duration_sec = round(len(y_normalized) / NORMALIZED_SR, 3)
 

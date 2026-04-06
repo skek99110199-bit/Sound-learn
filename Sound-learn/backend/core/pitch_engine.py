@@ -3,11 +3,9 @@ import math
 import librosa
 import numpy as np
 
-# ── 상수 ────────────────────────────────────────────────────────────────────
-SR = 22050
-HOP_LENGTH = 512       # 프레임 간격: 512 / 22050 ≈ 23ms
-FMIN = 65.4            # C2 (남성 최저음 ~65Hz)
-FMAX = 1046.5          # C6 (여성 고음 ~1047Hz)
+from core.config import FMAX, FMIN, HOP_LENGTH, SAMPLE_RATE
+
+# ── 로컬 상수 (표시 정밀도) ──────────────────────────────────────────────────
 MIDI_ROUND = 1         # MIDI 노트 소수점 자리수 (Piano Roll 스무딩용)
 FREQ_ROUND = 2         # Hz 소수점 자리수
 
@@ -31,16 +29,64 @@ def extract_pitch(file_path: str) -> list[dict]:
           {"time": 0.069, "frequency": null,   "midi_note": null},
           ...
         ]
+
+    Raises:
+        RuntimeError: 오디오 파일 로드 또는 피치 추출 실패 시
     """
     y, sr = _load_audio(file_path)
     f0, voiced_flag = _run_pyin(y, sr)
+    f0, voiced_flag = _smooth_pitch(f0, voiced_flag)
     return _build_frames(f0, voiced_flag, sr)
 
 
 # ── 내부 함수 ────────────────────────────────────────────────────────────────
+def _smooth_pitch(
+    f0: np.ndarray,
+    voiced_flag: np.ndarray,
+    max_jump_semitones: float = 6.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    노이즈 제거 및 단발 프레임 보간.
+
+    1) 단발 유성 프레임 제거 — 전후가 모두 무성인 1프레임짜리 유성 구간은 노이즈로 간주
+    2) 단발 무성 프레임 보간 — 전후가 모두 유성인 1프레임짜리 무성 구간은 선형 보간
+    3) 주파수 점프 필터 — 인접 프레임 대비 ±max_jump_semitones 초과 시 null 처리
+    """
+    f0 = f0.copy()
+    voiced = voiced_flag.copy()
+    n = len(f0)
+
+    # 1) 단발 유성 프레임 제거 (전후 모두 무성)
+    for i in range(1, n - 1):
+        if voiced[i] and not voiced[i - 1] and not voiced[i + 1]:
+            voiced[i] = False
+            f0[i] = np.nan
+
+    # 2) 단발 무성 프레임 보간 (전후 모두 유성)
+    for i in range(1, n - 1):
+        if not voiced[i] and voiced[i - 1] and voiced[i + 1]:
+            if not np.isnan(f0[i - 1]) and not np.isnan(f0[i + 1]):
+                f0[i] = (f0[i - 1] + f0[i + 1]) / 2
+                voiced[i] = True
+
+    # 3) 주파수 점프 필터 (±6반음 초과)
+    for i in range(1, n):
+        if voiced[i] and voiced[i - 1]:
+            if not np.isnan(f0[i]) and not np.isnan(f0[i - 1]) and f0[i - 1] > 0:
+                semitone_diff = abs(12 * np.log2(f0[i] / f0[i - 1]))
+                if semitone_diff > max_jump_semitones:
+                    voiced[i] = False
+                    f0[i] = np.nan
+
+    return f0, voiced
+
+
 def _load_audio(file_path: str) -> tuple[np.ndarray, int]:
     """오디오 파일을 22050Hz 모노로 로드한다."""
-    y, sr = librosa.load(file_path, sr=SR, mono=True)
+    try:
+        y, sr = librosa.load(file_path, sr=SAMPLE_RATE, mono=True)
+    except Exception as e:
+        raise RuntimeError(f"오디오 로드 실패: {e}") from e
     return y, sr
 
 

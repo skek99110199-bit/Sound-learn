@@ -13,7 +13,7 @@
 | 언어 / 프레임워크 | TypeScript · React (Next.js) / Python (FastAPI)                    |
 | 핵심 라이브러리   | Librosa, CREPE (Pitch Extraction), Tone.js (Audio Playback)        |
 | 데이터 형식     | Audio (WAV/MP3), MIDI (Reference Standard), JSON (Analysis Result) |
-| AI 모델      | OpenAI GPT-4o (피드백 생성), CREPE (딥러닝 기반 Pitch Tracking)              |
+| AI 모델      | claude code (피드백 생성), CREPE (딥러닝 기반 Pitch Tracking)              |
 | 핵심 지표      | Pitch Accuracy (음정), Rhythmic Precision (박자), Vocal Range (음역대)    |
 | 진입점        | app/page.tsx (Frontend) / main.py (Backend API)                    |
 

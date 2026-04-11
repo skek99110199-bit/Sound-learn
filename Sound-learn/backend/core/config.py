@@ -14,4 +14,9 @@ MAX_FILE_SIZE = 50 * 1024 * 1024   # 50MB
 TEMP_DIR = Path(__file__).parent.parent / "temp"
 
 # ── 서버 ─────────────────────────────────────────────────────────────────────
-CORS_ORIGINS = ["http://localhost:3000"]
+CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+]

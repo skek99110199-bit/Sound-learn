@@ -1,0 +1,11 @@
+.codex
+ScreenShot/
+
+# Python local environments and caches
+Sound-learn/backend/.venv/
+Sound-learn/backend/venv/
+Sound-learn/backend/**/__pycache__/
+Sound-learn/backend/**/*.pyc
+
+# Local test assets
+Sound-learn/test_assets/

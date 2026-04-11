@@ -8,6 +8,11 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 const UPLOAD_URL = `${API_URL}/api/upload`;
 const FFT_SIZE = 2048;
 const RECORDING_SAMPLE_RATE = 22050;
+const SUCCESS_MESSAGE_DELAY_MS = 900;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * WebM/Opus Blob을 WAV Blob으로 변환한다.
@@ -68,7 +73,6 @@ export default function VoiceRecorder({ onUploadSuccess, onUploadError }: VoiceR
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [isUploading, setIsUploading] = useState(false);
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
-  const [elapsed, setElapsed] = useState(0);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -106,6 +110,7 @@ export default function VoiceRecorder({ onUploadSuccess, onUploadError }: VoiceR
         }
         const data: UploadResponse = await res.json();
         setStatusMessage(`분석 완료 (${data.duration_sec.toFixed(1)}초)`);
+        await delay(SUCCESS_MESSAGE_DELAY_MS);
         onUploadSuccess?.(data);
       } catch (e) {
         const msg = e instanceof Error ? e.message : '업로드 실패';
@@ -162,15 +167,15 @@ export default function VoiceRecorder({ onUploadSuccess, onUploadError }: VoiceR
 
     recorder.start();
     setRecordingState('recording');
-    setElapsed(0);
     setStatusMessage('녹음 중... (0:00)');
 
     // 녹음 타이머
     timerRef.current = setInterval(() => {
-      setElapsed((prev) => {
-        const next = prev + 1;
-        setStatusMessage(`녹음 중... (${formatElapsed(next)})`);
-        return next;
+      setStatusMessage((prev) => {
+        const current = Number(prev.match(/\((\d+):(\d{2})\)/)?.[1] ?? 0) * 60
+          + Number(prev.match(/\((\d+):(\d{2})\)/)?.[2] ?? 0);
+        const next = current + 1;
+        return `녹음 중... (${formatElapsed(next)})`;
       });
     }, 1000);
   }, [uploadAudio]);
@@ -206,7 +211,6 @@ export default function VoiceRecorder({ onUploadSuccess, onUploadError }: VoiceR
     setRecordingState('idle');
     setStatusMessage('');
     setIsUploading(false);
-    setElapsed(0);
   }, []);
 
   const isRecording = recordingState === 'recording';

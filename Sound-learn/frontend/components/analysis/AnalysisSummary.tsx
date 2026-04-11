@@ -4,7 +4,7 @@ import type { AnalysisSummaryProps } from './types';
 import { midiToLabelFull, octaveColor } from './noteUtils';
 
 export default function AnalysisSummary({ durationSec, summary }: AnalysisSummaryProps) {
-  const { voiced_frames, total_frames, min_midi, max_midi, avg_frequency } = summary;
+  const { voiced_frames, total_frames, min_midi, max_midi } = summary;
 
   return (
     <div className="grid grid-cols-3 gap-3 w-full">

@@ -3,6 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.compare import router as compare_router
 from api.upload import router as upload_router
 from core.config import CORS_ORIGINS
 
@@ -22,6 +23,7 @@ app.add_middleware(
 )
 
 app.include_router(upload_router, prefix="/api")
+app.include_router(compare_router, prefix="/api")
 
 
 @app.get("/")

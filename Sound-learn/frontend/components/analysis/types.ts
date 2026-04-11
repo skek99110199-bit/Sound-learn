@@ -4,6 +4,33 @@ export interface PitchFrame {
   midi_note: number | null;
 }
 
+export interface AlignmentFrame {
+  user_time: number;
+  reference_time: number;
+  user_midi: number;
+  reference_midi: number;
+  user_frequency: number;
+  reference_frequency: number;
+  cent_error: number;
+  is_correct: boolean;
+}
+
+export interface JudgementSummary {
+  correct_frames: number;
+  total_compared_frames: number;
+  accuracy_percent: number;
+  avg_cent_error: number | null;
+  max_positive_cent_error: number | null;
+  max_negative_cent_error: number | null;
+}
+
+export interface CompareResponse {
+  user_pitch: PitchFrame[];
+  reference_pitch: PitchFrame[];
+  alignment: AlignmentFrame[];
+  judgement: JudgementSummary;
+}
+
 export interface PianoRollProps {
   pitchData: PitchFrame[];
   referenceData?: PitchFrame[];

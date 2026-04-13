@@ -1,10 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { VoiceRecorder } from '@/components/recorder';
 import type { UploadResponse } from '@/components/recorder';
-import type { PitchFrame } from '@/components/analysis';
-import { PianoRoll, AnalysisSummary } from '@/components/analysis';
+import type { CompareResponse, PitchFrame } from '@/components/analysis';
+import { PianoRoll, AnalysisSummary, CompareSummary } from '@/components/analysis';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+const COMPARE_URL = `${API_URL}/api/compare`;
 
 // 백엔드 없이 프론트엔드만 테스트할 때 사용하는 더미 데이터
 const DUMMY_PITCH: PitchFrame[] = [
@@ -57,30 +60,105 @@ const DUMMY_RESULT: UploadResponse = {
   },
 };
 
+const DEMO_REFERENCE_PITCH: PitchFrame[] = [
+  { time: 0.023, frequency: null, midi_note: 57.0 },
+  { time: 0.139, frequency: null, midi_note: 60.0 },
+  { time: 0.232, frequency: null, midi_note: 62.0 },
+  { time: 0.279, frequency: null, midi_note: 63.0 },
+  { time: 0.302, frequency: null, midi_note: 64.0 },
+  { time: 0.348, frequency: null, midi_note: 65.0 },
+  { time: 0.395, frequency: null, midi_note: 66.0 },
+  { time: 0.418, frequency: null, midi_note: 67.0 },
+  { time: 0.465, frequency: null, midi_note: 68.0 },
+  { time: 0.488, frequency: null, midi_note: 69.0 },
+  { time: 0.581, frequency: null, midi_note: 67.0 },
+  { time: 0.604, frequency: null, midi_note: 66.0 },
+  { time: 0.627, frequency: null, midi_note: 65.0 },
+  { time: 0.651, frequency: null, midi_note: 64.0 },
+  { time: 0.674, frequency: null, midi_note: 63.0 },
+  { time: 0.697, frequency: null, midi_note: 62.0 },
+];
+
+type CompareStatus = 'idle' | 'loading' | 'success' | 'error';
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return '비교 요청에 실패했습니다.';
+}
+
 export default function Home() {
   const [analysisResult, setAnalysisResult] = useState<UploadResponse | null>(null);
+  const [compareResult, setCompareResult] = useState<CompareResponse | null>(null);
+  const [compareStatus, setCompareStatus] = useState<CompareStatus>('idle');
+  const [compareError, setCompareError] = useState('');
 
-  const handleSuccess = (res: UploadResponse) => {
-    setAnalysisResult(res);
+  const runCompare = useCallback(async (uploadResult: UploadResponse) => {
+    setCompareStatus('loading');
+    setCompareError('');
+    setCompareResult(null);
+
+    try {
+      const response = await fetch(COMPARE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_pitch: uploadResult.pitch,
+          reference_pitch: DEMO_REFERENCE_PITCH,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response
+          .json()
+          .catch(() => ({ detail: '비교 중 알 수 없는 오류가 발생했습니다.' }));
+        throw new Error(errorBody.detail ?? `HTTP ${response.status}`);
+      }
+
+      const data: CompareResponse = await response.json();
+      setCompareResult(data);
+      setCompareStatus('success');
+    } catch (error) {
+      setCompareStatus('error');
+      setCompareError(getErrorMessage(error));
+    }
+  }, []);
+
+  const handleSuccess = (result: UploadResponse) => {
+    setAnalysisResult(result);
+    setCompareResult(null);
+    setCompareStatus('idle');
+    setCompareError('');
   };
 
   const handleReset = () => {
     setAnalysisResult(null);
+    setCompareResult(null);
+    setCompareStatus('idle');
+    setCompareError('');
   };
 
   const handleDemo = () => {
     setAnalysisResult(DUMMY_RESULT);
   };
 
-  return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-zinc-50">
-      <main className="flex flex-col items-center gap-8 p-10 bg-white rounded-xl shadow-md w-full max-w-3xl">
+  const handleRetryCompare = () => {
+    if (!analysisResult) return;
+    runCompare(analysisResult);
+  };
 
+  useEffect(() => {
+    if (!analysisResult) return;
+    runCompare(analysisResult);
+  }, [analysisResult, runCompare]);
+
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-50">
+      <main className="flex w-full max-w-3xl flex-col items-center gap-8 rounded-xl bg-white p-10 shadow-md">
         <h1 className="text-3xl font-bold">
           Sound-Learn
         </h1>
 
-        <p className="text-gray-600 text-center">
+        <p className="text-center text-gray-600">
           노래를 녹음하여 음정과 박자를 분석해보세요.
         </p>
 
@@ -89,31 +167,93 @@ export default function Home() {
             <VoiceRecorder onUploadSuccess={handleSuccess} />
             <button
               onClick={handleDemo}
-              className="text-xs text-zinc-400 hover:text-zinc-600 underline transition-colors"
+              className="text-xs text-zinc-400 underline transition-colors hover:text-zinc-600"
             >
               데모 데이터로 미리보기
             </button>
           </>
         ) : (
-          <div className="flex flex-col gap-6 w-full">
+          <div className="flex w-full flex-col gap-6">
             <AnalysisSummary
               durationSec={analysisResult.duration_sec}
               summary={analysisResult.summary}
             />
 
-            <PianoRoll pitchData={analysisResult.pitch} />
+            <section className="flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-zinc-900">Step 3 비교 결과</h2>
+                  <p className="text-sm text-zinc-500">
+                    업로드가 완료되면 기준 melody와 자동으로 비교합니다.
+                  </p>
+                </div>
+                {compareStatus === 'loading' && (
+                  <div className="flex items-center gap-2 text-sm text-zinc-500">
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
+                    비교 중...
+                  </div>
+                )}
+              </div>
+
+              {compareStatus === 'success' && compareResult ? (
+                <CompareSummary summary={compareResult.judgement} />
+              ) : compareStatus === 'error' ? (
+                <div className="flex flex-col gap-3 rounded-lg border border-red-200 bg-red-50 p-4">
+                  <p className="text-sm text-red-600">
+                    비교 결과를 불러오지 못했습니다. {compareError}
+                  </p>
+                  <div>
+                    <button
+                      onClick={handleRetryCompare}
+                      className="rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-600"
+                    >
+                      비교 다시 시도
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-500">
+                  비교 결과를 준비 중입니다.
+                </div>
+              )}
+            </section>
+
+            <section className="flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-zinc-900">피아노 롤</h2>
+                  <p className="text-sm text-zinc-500">
+                    사용자 pitch와 기준 melody를 겹쳐서 보여줍니다.
+                  </p>
+                </div>
+                <div className="flex items-center gap-4 text-xs text-zinc-500">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full bg-indigo-500" />
+                    사용자
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-0.5 w-4 bg-amber-500" />
+                    기준 melody
+                  </div>
+                </div>
+              </div>
+
+              <PianoRoll
+                pitchData={analysisResult.pitch}
+                referenceData={compareResult?.reference_pitch ?? DEMO_REFERENCE_PITCH}
+              />
+            </section>
 
             <div className="flex justify-center">
               <button
                 onClick={handleReset}
-                className="flex items-center gap-2 px-6 py-2 bg-zinc-600 hover:bg-zinc-700 text-white font-medium rounded-lg transition-colors"
+                className="flex items-center gap-2 rounded-lg bg-zinc-600 px-6 py-2 font-medium text-white transition-colors hover:bg-zinc-700"
               >
                 다시 녹음
               </button>
             </div>
           </div>
         )}
-
       </main>
     </div>
   );

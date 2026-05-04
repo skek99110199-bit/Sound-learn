@@ -1,6 +1,7 @@
 """Sound-Learn 공유 설정 — 모든 모듈이 참조하는 단일 진실 공급원."""
 
 from pathlib import Path
+import os
 
 # ── 오디오 처리 ──────────────────────────────────────────────────────────────
 SAMPLE_RATE = 22050          # 정규화 샘플레이트 (Hz)
@@ -20,3 +21,6 @@ CORS_ORIGINS = [
     "http://localhost:3001",
     "http://127.0.0.1:3001",
 ]
+
+# OpenAI feedback generation
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")

@@ -9,3 +9,7 @@ Sound-learn/backend/**/*.pyc
 
 # Local test assets
 Sound-learn/test_assets/
+
+# API 키 등 환경변수 (절대 git에 올리면 안 됨)
+Sound-learn/backend/.env
+Sound-learn/frontend/.env.local

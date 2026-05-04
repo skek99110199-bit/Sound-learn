@@ -1,4 +1,10 @@
 import logging
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# 백엔드 폴더의 .env 파일 자동 로드
+load_dotenv(Path(__file__).parent / ".env")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

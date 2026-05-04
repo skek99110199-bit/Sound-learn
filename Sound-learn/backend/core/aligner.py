@@ -52,10 +52,9 @@ def align_midi_sequences(
         if prev is None:
             break
 
-        pi, pj = prev
-        if pi == i - 1 and pj == j - 1:
-            path.append((i - 1, j - 1))
-        i, j = pi, pj
+        # 대각선/수직/수평 이동 모두 기록 (이전 코드는 대각선만 기록하는 버그 있었음)
+        path.append((i - 1, j - 1))
+        i, j = prev
 
     path.reverse()
     return path

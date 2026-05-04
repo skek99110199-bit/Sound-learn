@@ -8,22 +8,25 @@
 const NOTE_NAMES_KO = ['도', '도#', '레', '레#', '미', '파', '파#', '솔', '솔#', '라', '라#', '시'];
 const NOTE_NAMES_EN = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
-/** 옥타브별 색상 팔레트 */
+/** 옥타브별 색상 팔레트 (한국 표기 기준: C4=2옥타브, C5=3옥타브) */
 const OCTAVE_COLORS: Record<number, string> = {
-  1: '#a1a1aa', // zinc-400  — 1옥타브 (매우 낮음)
-  2: '#8b5cf6', // violet-500 — 2옥타브
-  3: '#3b82f6', // blue-500  — 3옥타브
-  4: '#10b981', // emerald-500 — 4옥타브 (가온다)
-  5: '#f59e0b', // amber-500  — 5옥타브
-  6: '#ef4444', // red-500   — 6옥타브 (매우 높음)
-  7: '#ec4899', // pink-500  — 7옥타브
+  0: '#a1a1aa', // zinc-400   — 0옥타브 (매우 낮음, C3 이하)
+  1: '#8b5cf6', // violet-500 — 1옥타브 (C3~B3)
+  2: '#3b82f6', // blue-500   — 2옥타브 (C4~B4, 가온다)
+  3: '#10b981', // emerald-500 — 3옥타브 (C5~B5)
+  4: '#f59e0b', // amber-500  — 4옥타브 (C6~B6)
+  5: '#ef4444', // red-500    — 5옥타브 (C7 이상, 매우 높음)
 };
 
 const DEFAULT_COLOR = '#71717a'; // zinc-500
 
-/** MIDI 노트 번호에서 옥타브 추출 (C4 = 60 → 4옥타브) */
+/**
+ * MIDI 노트 번호에서 한국식 옥타브 추출
+ * 한국 표기법: C4(MIDI 60) = 2옥타브, C5(MIDI 72) = 3옥타브
+ * 계산: Math.floor(midi / 12) - 3
+ */
 export function midiToOctave(midi: number): number {
-  return Math.floor(Math.round(midi) / 12) - 1;
+  return Math.floor(Math.round(midi) / 12) - 3;
 }
 
 /** MIDI → 한국어 음이름 (예: "도", "솔#") */

@@ -5,8 +5,10 @@ import { VoiceRecorder } from '@/components/recorder';
 import type { UploadResponse } from '@/components/recorder';
 import type { CompareResponse, PitchFrame } from '@/components/analysis';
 import { PianoRoll, AnalysisSummary, CompareSummary } from '@/components/analysis';
-import { FeedbackReport, FeedbackLoading, FeedbackError } from '@/components/report';
+import { FeedbackReport, FeedbackLoading, FeedbackError, MetricsReport } from '@/components/report';
 import type { FeedbackApiResponse, FeedbackResponse } from '@/components/report';
+import { SongSelector } from '@/components/songs';
+import type { SongMeta, ReferencePitchFrame } from '@/components/songs';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 const COMPARE_URL = `${API_URL}/api/compare`;
@@ -63,35 +65,32 @@ const DUMMY_RESULT: UploadResponse = {
   },
 };
 
-const DEMO_REFERENCE_PITCH: PitchFrame[] = [
-  { time: 0.023, frequency: null, midi_note: 57.0 },
-  { time: 0.139, frequency: null, midi_note: 60.0 },
-  { time: 0.232, frequency: null, midi_note: 62.0 },
-  { time: 0.279, frequency: null, midi_note: 63.0 },
-  { time: 0.302, frequency: null, midi_note: 64.0 },
-  { time: 0.348, frequency: null, midi_note: 65.0 },
-  { time: 0.395, frequency: null, midi_note: 66.0 },
-  { time: 0.418, frequency: null, midi_note: 67.0 },
-  { time: 0.465, frequency: null, midi_note: 68.0 },
-  { time: 0.488, frequency: null, midi_note: 69.0 },
-  { time: 0.581, frequency: null, midi_note: 67.0 },
-  { time: 0.604, frequency: null, midi_note: 66.0 },
-  { time: 0.627, frequency: null, midi_note: 65.0 },
-  { time: 0.651, frequency: null, midi_note: 64.0 },
-  { time: 0.674, frequency: null, midi_note: 63.0 },
-  { time: 0.697, frequency: null, midi_note: 62.0 },
-];
-
-// 데모 모드용 더미 피드백 (백엔드 없이 UI 확인용)
 const DUMMY_FEEDBACK: FeedbackResponse = {
   overall: '전반적으로 음정의 흐름이 안정적입니다. 중간 음역대에서 정확도가 높고, 음을 유지하는 능력이 좋습니다.',
-  strengths: ['중간 음역대(2옥타브 라 ~ 3옥타브 도) 구간에서 음정 정확도가 높습니다', '음정 변화 구간에서 안정적인 전환이 이루어졌습니다'],
+  strengths: ['중간 음역대 구간에서 음정 정확도가 높습니다', '음정 변화 구간에서 안정적인 전환이 이루어졌습니다'],
   improvements: ['전반적으로 약 30cent 낮게 부르는 경향이 있습니다', '고음 구간에서 음정이 떨어지는 현상이 있습니다'],
   practice_tips: ['노래 시작 전 기준음을 충분히 듣고 발성을 맞춰보세요', '낮은 음부터 천천히 스케일 연습을 해보세요'],
   focus_segments: [
     { start_time: 0.3, end_time: 0.5, issue: '음정이 기준보다 낮음', tip: '해당 구간을 반음 높여 연습해보세요' },
   ],
   score_label: 'good',
+};
+
+const DUMMY_COMPARE: CompareResponse = {
+  user_pitch: DUMMY_PITCH,
+  reference_pitch: [],
+  alignment: [],
+  judgement: {
+    correct_frames: 18,
+    total_compared_frames: 26,
+    accuracy_percent: 69.2,
+    avg_cent_error: -28.5,
+    max_positive_cent_error: 60.0,
+    max_negative_cent_error: -150.0,
+    avg_abs_timing_error_sec: 0.12,
+    max_abs_timing_error_sec: 0.31,
+  },
+  error_segments: [],
 };
 
 type AsyncStatus = 'idle' | 'loading' | 'success' | 'error';
@@ -102,6 +101,11 @@ function getErrorMessage(error: unknown): string {
 }
 
 export default function Home() {
+  // 곡 선택 상태
+  const [selectedSong, setSelectedSong] = useState<SongMeta | null>(null);
+  const [referencePitch, setReferencePitch] = useState<ReferencePitchFrame[] | null>(null);
+
+  // 분석 결과 상태
   const [analysisResult, setAnalysisResult] = useState<UploadResponse | null>(null);
   const [isDemo, setIsDemo] = useState(false);
 
@@ -113,7 +117,11 @@ export default function Home() {
   const [feedbackStatus, setFeedbackStatus] = useState<AsyncStatus>('idle');
   const [feedbackError, setFeedbackError] = useState('');
 
-  // compare 완료 후 feedback 호출
+  const handleSongSelect = (song: SongMeta, frames: ReferencePitchFrame[]) => {
+    setSelectedSong(song);
+    setReferencePitch(frames);
+  };
+
   const runFeedback = useCallback(async (
     uploadResult: UploadResponse,
     compareData: CompareResponse,
@@ -158,13 +166,15 @@ export default function Home() {
     setFeedbackStatus('idle');
     setFeedbackResult(null);
 
-    // 데모 모드: 백엔드 없이 더미 피드백 표시
     if (demo) {
-      setCompareStatus('idle');
+      setCompareResult(DUMMY_COMPARE);
+      setCompareStatus('success');
       setFeedbackResult(DUMMY_FEEDBACK);
       setFeedbackStatus('success');
       return;
     }
+
+    const ref = referencePitch ?? [];
 
     try {
       const response = await fetch(COMPARE_URL, {
@@ -172,7 +182,7 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_pitch: uploadResult.pitch,
-          reference_pitch: DEMO_REFERENCE_PITCH,
+          reference_pitch: ref,
         }),
       });
 
@@ -186,13 +196,12 @@ export default function Home() {
       const data: CompareResponse = await response.json();
       setCompareResult(data);
       setCompareStatus('success');
-      // compare 성공 시 feedback 자동 호출
       await runFeedback(uploadResult, data);
     } catch (error) {
       setCompareStatus('error');
       setCompareError(getErrorMessage(error));
     }
-  }, [runFeedback]);
+  }, [referencePitch, runFeedback]);
 
   const handleSuccess = (result: UploadResponse) => {
     setIsDemo(false);
@@ -244,17 +253,29 @@ export default function Home() {
   }, [analysisResult]);
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-50">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-50 py-10">
       <main className="flex w-full max-w-3xl flex-col items-center gap-8 rounded-xl bg-white p-10 shadow-md">
         <h1 className="text-3xl font-bold">Sound-Learn</h1>
-
         <p className="text-center text-gray-600">
           노래를 녹음하여 음정과 박자를 분석해보세요.
         </p>
 
         {!analysisResult ? (
           <>
+            {/* 곡 선택 */}
+            <SongSelector onSelect={handleSongSelect} />
+
+            {/* 선택된 곡 표시 */}
+            {selectedSong && (
+              <div className="flex w-full items-center gap-2 rounded-lg bg-indigo-50 px-4 py-2.5 text-sm">
+                <span className="text-indigo-500">🎵</span>
+                <span className="font-medium text-indigo-700">{selectedSong.title}</span>
+                <span className="text-indigo-400">선택됨 — 이 곡을 따라 불러보세요</span>
+              </div>
+            )}
+
             <VoiceRecorder onUploadSuccess={handleSuccess} />
+
             <button
               onClick={handleDemo}
               className="text-xs text-zinc-400 underline transition-colors hover:text-zinc-600"
@@ -271,13 +292,24 @@ export default function Home() {
               summary={analysisResult.summary}
             />
 
-            {/* 비교 결과 (실제 모드에서만) */}
+            {/* 핵심 지표 (8주차) */}
+            {compareResult && (
+              <MetricsReport
+                judgement={compareResult.judgement}
+                pitchSummary={analysisResult.summary}
+                durationSec={analysisResult.duration_sec}
+              />
+            )}
+
+            {/* 비교 분석 */}
             {!isDemo && (
               <section className="flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h2 className="text-lg font-semibold text-zinc-900">비교 분석</h2>
-                    <p className="text-sm text-zinc-500">기준 melody와 음정을 비교합니다.</p>
+                    <p className="text-sm text-zinc-500">
+                      {selectedSong ? `기준곡: ${selectedSong.title}` : '기준 melody와 음정을 비교합니다.'}
+                    </p>
                   </div>
                   {compareStatus === 'loading' && (
                     <div className="flex items-center gap-2 text-sm text-zinc-500">
@@ -294,23 +326,15 @@ export default function Home() {
                   />
                 ) : compareStatus === 'error' ? (
                   <div className="flex flex-col gap-3 rounded-lg border border-red-200 bg-red-50 p-4">
-                    <p className="text-sm text-red-600">
-                      비교 결과를 불러오지 못했습니다. {compareError}
-                    </p>
-                    <div>
-                      <button
-                        onClick={handleRetryCompare}
-                        className="rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-600"
-                      >
-                        비교 다시 시도
-                      </button>
-                    </div>
+                    <p className="text-sm text-red-600">비교 결과를 불러오지 못했습니다. {compareError}</p>
+                    <button
+                      onClick={handleRetryCompare}
+                      className="w-fit rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-600"
+                    >
+                      비교 다시 시도
+                    </button>
                   </div>
-                ) : compareStatus === 'idle' ? null : (
-                  <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-500">
-                    비교 결과를 준비 중입니다.
-                  </div>
-                )}
+                ) : null}
               </section>
             )}
 
@@ -319,22 +343,16 @@ export default function Home() {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-semibold text-zinc-900">피아노 롤</h2>
-                  <p className="text-sm text-zinc-500">
-                    사용자 pitch{!isDemo && ' 와 기준 melody를 겹쳐서 보여줍니다'}
-                  </p>
+                  <p className="text-sm text-zinc-500">사용자 pitch와 기준 melody를 겹쳐서 보여줍니다.</p>
                 </div>
-                {!isDemo && (
-                  <div className="flex items-center gap-4 text-xs text-zinc-500">
-                    <div className="flex items-center gap-2">
-                      <span className="h-2.5 w-2.5 rounded-full bg-indigo-500" />
-                      사용자
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="h-0.5 w-4 bg-amber-500" />
-                      기준 melody
-                    </div>
+                <div className="flex items-center gap-4 text-xs text-zinc-500">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full bg-indigo-500" />사용자
                   </div>
-                )}
+                  <div className="flex items-center gap-2">
+                    <span className="h-0.5 w-4 bg-amber-500" />기준 melody
+                  </div>
+                </div>
               </div>
               <PianoRoll
                 pitchData={analysisResult.pitch}
@@ -348,16 +366,12 @@ export default function Home() {
                 <h2 className="text-lg font-semibold text-zinc-900">AI 피드백</h2>
                 <p className="text-sm text-zinc-500">분석 결과를 바탕으로 AI가 피드백을 제공합니다.</p>
               </div>
-
               {feedbackStatus === 'loading' && <FeedbackLoading />}
               {feedbackStatus === 'success' && feedbackResult && (
                 <FeedbackReport feedback={feedbackResult} />
               )}
               {feedbackStatus === 'error' && (
-                <FeedbackError
-                  message={feedbackError}
-                  onRetry={handleRetryFeedback}
-                />
+                <FeedbackError message={feedbackError} onRetry={handleRetryFeedback} />
               )}
             </section>
 

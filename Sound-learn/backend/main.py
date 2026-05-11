@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.compare import router as compare_router
 from api.feedback import router as feedback_router
+from api.songs import router as songs_router
 from api.upload import router as upload_router
 from core.config import CORS_ORIGINS
 
@@ -32,6 +33,7 @@ app.add_middleware(
 app.include_router(upload_router, prefix="/api")
 app.include_router(compare_router, prefix="/api")
 app.include_router(feedback_router, prefix="/api")
+app.include_router(songs_router, prefix="/api")
 
 
 @app.get("/")

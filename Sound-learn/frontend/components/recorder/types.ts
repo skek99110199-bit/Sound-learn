@@ -33,4 +33,5 @@ export interface WaveformVisualizerProps {
 export interface VoiceRecorderProps {
   onUploadSuccess?: (res: UploadResponse) => void;
   onUploadError?: (msg: string) => void;
+  onAudioReady?: (url: string) => void;
 }

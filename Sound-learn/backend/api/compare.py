@@ -1,13 +1,17 @@
+"""사용자 pitch와 레퍼런스 pitch를 비교하는 API."""
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from core.aligner import align_midi_sequences, calculate_cent_error, midi_to_hz
+from core.aligner import align_midi_sequences, calculate_cent_error, find_best_offset, midi_to_hz
+from core.phrase_detector import compute_phrase_results, detect_phrases
 
 router = APIRouter()
 
-CENT_TOLERANCE = 100.0
-ERROR_SEGMENT_MAX_GAP_SEC = 0.18
+CENT_TOLERANCE = 100.0  # ±100 cent 이내면 정답으로 판정
 
+
+# ── 요청 / 응답 모델 ──────────────────────────────────────────────────────────
 
 class ComparePitchFrame(BaseModel):
     time: float = Field(ge=0)
@@ -43,13 +47,17 @@ class JudgementSummary(BaseModel):
     max_abs_timing_error_sec: float | None
 
 
-class ErrorSegment(BaseModel):
-    start_time: float
-    end_time: float
-    avg_cent_error: float
-    max_abs_cent_error: float
-    direction: str
+class PhraseResult(BaseModel):
+    index: int
+    ref_start_time: float
+    ref_end_time: float
+    user_start_time: float
+    user_end_time: float
+    accuracy_percent: float
+    avg_cent_error: float | None
+    direction: str   # 'sharp' | 'flat' | 'mixed'
     frame_count: int
+    is_good: bool
 
 
 class CompareResponse(BaseModel):
@@ -57,148 +65,124 @@ class CompareResponse(BaseModel):
     reference_pitch: list[ComparePitchFrame]
     alignment: list[AlignmentFrame]
     judgement: JudgementSummary
-    error_segments: list[ErrorSegment]
+    phrase_results: list[PhraseResult] = []
+    detected_offset_sec: float | None = None
 
 
-def _normalize_frames(frames: list[ComparePitchFrame]) -> list[ComparePitchFrame]:
-    return [frame for frame in frames if frame.midi_note is not None]
+# ── 내부 헬퍼 ────────────────────────────────────────────────────────────────
+
+def _only_voiced(frames: list[ComparePitchFrame]) -> list[ComparePitchFrame]:
+    """midi_note가 None인 무성 프레임을 제거한다."""
+    return [f for f in frames if f.midi_note is not None]
 
 
 def _resolve_frequency(frame: ComparePitchFrame) -> float:
+    """frame에서 frequency를 반환한다. 없으면 midi_note로 계산한다."""
     if frame.frequency is not None:
         return frame.frequency
-    if frame.midi_note is None:
-        raise ValueError("midi_note or frequency is required.")
-    return midi_to_hz(frame.midi_note)
+    return midi_to_hz(frame.midi_note)  # type: ignore[arg-type]
 
 
-def _build_error_segments(
+def _build_judgement(
     alignment: list[AlignmentFrame],
-    max_gap_sec: float = ERROR_SEGMENT_MAX_GAP_SEC,
-) -> list[ErrorSegment]:
-    error_frames = [frame for frame in alignment if not frame.is_correct]
-    if not error_frames:
-        return []
-
-    sorted_frames = sorted(error_frames, key=lambda frame: frame.user_time)
-    groups: list[list[AlignmentFrame]] = []
-    current = [sorted_frames[0]]
-
-    for frame in sorted_frames[1:]:
-        previous = current[-1]
-        if frame.user_time - previous.user_time <= max_gap_sec:
-            current.append(frame)
-        else:
-            groups.append(current)
-            current = [frame]
-    groups.append(current)
-
-    return [_summarize_error_group(group) for group in groups]
-
-
-def _summarize_error_group(group: list[AlignmentFrame]) -> ErrorSegment:
-    cent_errors = [frame.cent_error for frame in group]
-    avg_cent_error = sum(cent_errors) / len(cent_errors)
-    max_abs_cent_error = max(abs(value) for value in cent_errors)
-
-    if avg_cent_error > 20:
-        direction = "sharp"
-    elif avg_cent_error < -20:
-        direction = "flat"
-    else:
-        direction = "mixed"
-
-    return ErrorSegment(
-        start_time=round(group[0].user_time, 3),
-        end_time=round(group[-1].user_time, 3),
-        avg_cent_error=round(avg_cent_error, 2),
-        max_abs_cent_error=round(max_abs_cent_error, 2),
-        direction=direction,
-        frame_count=len(group),
+    cent_errors: list[float],
+    timing_errors: list[float],
+) -> JudgementSummary:
+    correct = sum(1 for f in alignment if f.is_correct)
+    total = len(alignment)
+    return JudgementSummary(
+        correct_frames=correct,
+        total_compared_frames=total,
+        accuracy_percent=round(correct / total * 100, 2),
+        avg_cent_error=round(sum(cent_errors) / len(cent_errors), 2) if cent_errors else None,
+        max_positive_cent_error=round(max(cent_errors), 2) if cent_errors else None,
+        max_negative_cent_error=round(min(cent_errors), 2) if cent_errors else None,
+        avg_abs_timing_error_sec=round(
+            sum(abs(v) for v in timing_errors) / len(timing_errors), 3
+        ) if timing_errors else None,
+        max_abs_timing_error_sec=round(
+            max(abs(v) for v in timing_errors), 3
+        ) if timing_errors else None,
     )
 
+
+# ── 엔드포인트 ────────────────────────────────────────────────────────────────
 
 @router.post("/compare", response_model=CompareResponse)
 async def compare_pitch(request: CompareRequest):
-    user_frames = _normalize_frames(request.user_pitch)
-    reference_frames = _normalize_frames(request.reference_pitch)
+    user_frames = _only_voiced(request.user_pitch)
+    ref_frames  = _only_voiced(request.reference_pitch)
 
     if not user_frames:
-        raise HTTPException(status_code=422, detail="No voiced user_pitch frames are available.")
-    if not reference_frames:
-        raise HTTPException(status_code=422, detail="No voiced reference_pitch frames are available.")
+        raise HTTPException(status_code=422, detail="유성 user_pitch 프레임이 없습니다.")
+    if not ref_frames:
+        raise HTTPException(status_code=422, detail="유성 reference_pitch 프레임이 없습니다.")
 
-    path = align_midi_sequences(
-        [frame.midi_note for frame in user_frames if frame.midi_note is not None],
-        [frame.midi_note for frame in reference_frames if frame.midi_note is not None],
-    )
+    user_notes = [f.midi_note for f in user_frames]
+    ref_notes  = [f.midi_note for f in ref_frames]
 
+    # ── Subsequence DTW: 레퍼런스에서 최적 구간 자동 탐색 ──────────────────────
+    start_idx, end_idx = find_best_offset(user_notes, ref_notes)
+    sliced_ref = ref_frames[start_idx:end_idx] if end_idx > start_idx else ref_frames
+
+    detected_offset_sec = round(sliced_ref[0].time, 2) if sliced_ref else None
+    time_offset         = sliced_ref[0].time if sliced_ref else 0.0
+    sliced_notes        = [f.midi_note for f in sliced_ref]
+
+    path = align_midi_sequences(user_notes, sliced_notes)
     if not path:
-        raise HTTPException(status_code=422, detail="DTW alignment could not be created.")
+        raise HTTPException(status_code=422, detail="DTW alignment을 생성할 수 없습니다.")
 
+    # ── Alignment 계산 ────────────────────────────────────────────────────────
     alignment: list[AlignmentFrame] = []
     cent_errors: list[float] = []
     timing_errors: list[float] = []
 
     try:
-        for user_index, reference_index in path:
-            user = user_frames[user_index]
-            reference = reference_frames[reference_index]
+        for user_idx, ref_idx in path:
+            u = user_frames[user_idx]
+            r = sliced_ref[ref_idx]
 
-            if user.midi_note is None or reference.midi_note is None:
-                continue
+            u_freq  = _resolve_frequency(u)
+            r_freq  = _resolve_frequency(r)
+            cent_err    = round(calculate_cent_error(u_freq, r_freq), 2)
+            timing_err  = round(u.time - (r.time - time_offset), 3)
+            is_correct  = abs(cent_err) <= CENT_TOLERANCE
 
-            user_frequency = _resolve_frequency(user)
-            reference_frequency = _resolve_frequency(reference)
-            cent_error = round(calculate_cent_error(user_frequency, reference_frequency), 2)
-            timing_error = round(user.time - reference.time, 3)
-            is_correct = abs(cent_error) <= CENT_TOLERANCE
-
-            alignment.append(
-                AlignmentFrame(
-                    user_time=round(user.time, 3),
-                    reference_time=round(reference.time, 3),
-                    timing_error_sec=timing_error,
-                    user_midi=round(user.midi_note, 1),
-                    reference_midi=round(reference.midi_note, 1),
-                    user_frequency=round(user_frequency, 2),
-                    reference_frequency=round(reference_frequency, 2),
-                    cent_error=cent_error,
-                    is_correct=is_correct,
-                )
-            )
-            cent_errors.append(cent_error)
-            timing_errors.append(timing_error)
+            alignment.append(AlignmentFrame(
+                user_time=round(u.time, 3),
+                reference_time=round(r.time, 3),
+                timing_error_sec=timing_err,
+                user_midi=round(u.midi_note, 1),       # type: ignore[arg-type]
+                reference_midi=round(r.midi_note, 1),  # type: ignore[arg-type]
+                user_frequency=round(u_freq, 2),
+                reference_frequency=round(r_freq, 2),
+                cent_error=cent_err,
+                is_correct=is_correct,
+            ))
+            cent_errors.append(cent_err)
+            timing_errors.append(timing_err)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     if not alignment:
-        raise HTTPException(status_code=422, detail="No comparable frames remained after alignment.")
+        raise HTTPException(status_code=422, detail="비교 가능한 프레임이 없습니다.")
 
-    correct_frames = sum(1 for frame in alignment if frame.is_correct)
-    total_compared_frames = len(alignment)
-
-    judgement = JudgementSummary(
-        correct_frames=correct_frames,
-        total_compared_frames=total_compared_frames,
-        accuracy_percent=round((correct_frames / total_compared_frames) * 100, 2),
-        avg_cent_error=round(sum(cent_errors) / len(cent_errors), 2) if cent_errors else None,
-        max_positive_cent_error=round(max(cent_errors), 2) if cent_errors else None,
-        max_negative_cent_error=round(min(cent_errors), 2) if cent_errors else None,
-        avg_abs_timing_error_sec=round(
-            sum(abs(value) for value in timing_errors) / len(timing_errors),
-            3,
-        ) if timing_errors else None,
-        max_abs_timing_error_sec=round(
-            max(abs(value) for value in timing_errors),
-            3,
-        ) if timing_errors else None,
-    )
+    # ── 소절 단위 집계 ────────────────────────────────────────────────────────
+    ref_dicts   = [{"time": f.time, "midi_note": f.midi_note} for f in sliced_ref]
+    phrases     = detect_phrases(ref_dicts)
+    phrase_results = [
+        PhraseResult(**r) for r in compute_phrase_results(alignment, phrases)
+    ]
 
     return CompareResponse(
         user_pitch=request.user_pitch,
-        reference_pitch=request.reference_pitch,
+        reference_pitch=[
+            ComparePitchFrame(time=f.time, midi_note=f.midi_note, frequency=f.frequency)
+            for f in sliced_ref
+        ],
         alignment=alignment,
-        judgement=judgement,
-        error_segments=_build_error_segments(alignment),
+        judgement=_build_judgement(alignment, cent_errors, timing_errors),
+        phrase_results=phrase_results,
+        detected_offset_sec=detected_offset_sec,
     )

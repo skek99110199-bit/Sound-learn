@@ -3,95 +3,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { VoiceRecorder } from '@/components/recorder';
 import type { UploadResponse } from '@/components/recorder';
-import type { CompareResponse, PitchFrame } from '@/components/analysis';
+import type { CompareResponse } from '@/components/analysis';
 import { PianoRoll, AnalysisSummary, CompareSummary } from '@/components/analysis';
 import { FeedbackReport, FeedbackLoading, FeedbackError, MetricsReport } from '@/components/report';
 import type { FeedbackApiResponse, FeedbackResponse } from '@/components/report';
 import { SongSelector } from '@/components/songs';
 import type { SongMeta, ReferencePitchFrame } from '@/components/songs';
+import { DEMO_UPLOAD, DEMO_COMPARE, DEMO_FEEDBACK } from '@/lib/demoData';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+const API_URL     = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 const COMPARE_URL = `${API_URL}/api/compare`;
 const FEEDBACK_URL = `${API_URL}/api/feedback`;
-
-// 백엔드 없이 프론트엔드만 테스트할 때 사용하는 더미 데이터
-const DUMMY_PITCH: PitchFrame[] = [
-  { time: 0.023, frequency: 220.0, midi_note: 57.0 },
-  { time: 0.046, frequency: 225.0, midi_note: 57.4 },
-  { time: 0.069, frequency: 233.08, midi_note: 58.0 },
-  { time: 0.093, frequency: null, midi_note: null },
-  { time: 0.116, frequency: null, midi_note: null },
-  { time: 0.139, frequency: 261.63, midi_note: 60.0 },
-  { time: 0.163, frequency: 265.0, midi_note: 60.2 },
-  { time: 0.186, frequency: 269.0, midi_note: 60.5 },
-  { time: 0.209, frequency: 277.18, midi_note: 61.0 },
-  { time: 0.232, frequency: 293.66, midi_note: 62.0 },
-  { time: 0.255, frequency: 296.0, midi_note: 62.1 },
-  { time: 0.279, frequency: 311.13, midi_note: 63.0 },
-  { time: 0.302, frequency: 329.63, midi_note: 64.0 },
-  { time: 0.325, frequency: null, midi_note: null },
-  { time: 0.348, frequency: 349.23, midi_note: 65.0 },
-  { time: 0.372, frequency: 355.0, midi_note: 65.3 },
-  { time: 0.395, frequency: 369.99, midi_note: 66.0 },
-  { time: 0.418, frequency: 392.0, midi_note: 67.0 },
-  { time: 0.441, frequency: 400.0, midi_note: 67.3 },
-  { time: 0.465, frequency: 415.3, midi_note: 68.0 },
-  { time: 0.488, frequency: 440.0, midi_note: 69.0 },
-  { time: 0.511, frequency: 435.0, midi_note: 68.8 },
-  { time: 0.534, frequency: 420.0, midi_note: 68.2 },
-  { time: 0.558, frequency: null, midi_note: null },
-  { time: 0.581, frequency: 392.0, midi_note: 67.0 },
-  { time: 0.604, frequency: 370.0, midi_note: 66.0 },
-  { time: 0.627, frequency: 349.23, midi_note: 65.0 },
-  { time: 0.651, frequency: 329.63, midi_note: 64.0 },
-  { time: 0.674, frequency: 311.13, midi_note: 63.0 },
-  { time: 0.697, frequency: 293.66, midi_note: 62.0 },
-];
-
-const DUMMY_RESULT: UploadResponse = {
-  filename: 'demo_recording.webm',
-  duration_sec: 0.72,
-  original_sr: 44100,
-  normalized_sr: 22050,
-  pitch: DUMMY_PITCH,
-  summary: {
-    voiced_frames: 26,
-    total_frames: 30,
-    min_frequency: 220.0,
-    max_frequency: 440.0,
-    min_midi: 57.0,
-    max_midi: 69.0,
-    avg_frequency: 330.5,
-  },
-};
-
-const DUMMY_FEEDBACK: FeedbackResponse = {
-  overall: '전반적으로 음정의 흐름이 안정적입니다. 중간 음역대에서 정확도가 높고, 음을 유지하는 능력이 좋습니다.',
-  strengths: ['중간 음역대 구간에서 음정 정확도가 높습니다', '음정 변화 구간에서 안정적인 전환이 이루어졌습니다'],
-  improvements: ['전반적으로 약 30cent 낮게 부르는 경향이 있습니다', '고음 구간에서 음정이 떨어지는 현상이 있습니다'],
-  practice_tips: ['노래 시작 전 기준음을 충분히 듣고 발성을 맞춰보세요', '낮은 음부터 천천히 스케일 연습을 해보세요'],
-  focus_segments: [
-    { start_time: 0.3, end_time: 0.5, issue: '음정이 기준보다 낮음', tip: '해당 구간을 반음 높여 연습해보세요' },
-  ],
-  score_label: 'good',
-};
-
-const DUMMY_COMPARE: CompareResponse = {
-  user_pitch: DUMMY_PITCH,
-  reference_pitch: [],
-  alignment: [],
-  judgement: {
-    correct_frames: 18,
-    total_compared_frames: 26,
-    accuracy_percent: 69.2,
-    avg_cent_error: -28.5,
-    max_positive_cent_error: 60.0,
-    max_negative_cent_error: -150.0,
-    avg_abs_timing_error_sec: 0.12,
-    max_abs_timing_error_sec: 0.31,
-  },
-  error_segments: [],
-};
 
 type AsyncStatus = 'idle' | 'loading' | 'success' | 'error';
 
@@ -100,157 +22,168 @@ function getErrorMessage(error: unknown): string {
   return '요청에 실패했습니다.';
 }
 
+// ── 초기 상태 ─────────────────────────────────────────────────────────────────
+
+const INITIAL_COMPARE_STATE = {
+  result: null as CompareResponse | null,
+  status: 'idle' as AsyncStatus,
+  error: '',
+};
+
+const INITIAL_FEEDBACK_STATE = {
+  result: null as FeedbackResponse | null,
+  status: 'idle' as AsyncStatus,
+  error: '',
+};
+
+// ── 메인 컴포넌트 ─────────────────────────────────────────────────────────────
+
 export default function Home() {
-  // 곡 선택 상태
-  const [selectedSong, setSelectedSong] = useState<SongMeta | null>(null);
-  const [referencePitch, setReferencePitch] = useState<ReferencePitchFrame[] | null>(null);
+  const [selectedSong,    setSelectedSong]    = useState<SongMeta | null>(null);
+  const [referencePitch,  setReferencePitch]  = useState<ReferencePitchFrame[] | null>(null);
+  const [analysisResult,  setAnalysisResult]  = useState<UploadResponse | null>(null);
+  const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null);
+  const [isDemo,          setIsDemo]          = useState(false);
 
-  // 분석 결과 상태
-  const [analysisResult, setAnalysisResult] = useState<UploadResponse | null>(null);
-  const [isDemo, setIsDemo] = useState(false);
+  const [compareResult, setCompareResult] = useState(INITIAL_COMPARE_STATE.result);
+  const [compareStatus, setCompareStatus] = useState(INITIAL_COMPARE_STATE.status);
+  const [compareError,  setCompareError]  = useState(INITIAL_COMPARE_STATE.error);
 
-  const [compareResult, setCompareResult] = useState<CompareResponse | null>(null);
-  const [compareStatus, setCompareStatus] = useState<AsyncStatus>('idle');
-  const [compareError, setCompareError] = useState('');
+  const [feedbackResult, setFeedbackResult] = useState(INITIAL_FEEDBACK_STATE.result);
+  const [feedbackStatus, setFeedbackStatus] = useState(INITIAL_FEEDBACK_STATE.status);
+  const [feedbackError,  setFeedbackError]  = useState(INITIAL_FEEDBACK_STATE.error);
 
-  const [feedbackResult, setFeedbackResult] = useState<FeedbackResponse | null>(null);
-  const [feedbackStatus, setFeedbackStatus] = useState<AsyncStatus>('idle');
-  const [feedbackError, setFeedbackError] = useState('');
+  // ── 상태 초기화 헬퍼 ────────────────────────────────────────────────────────
 
-  const handleSongSelect = (song: SongMeta, frames: ReferencePitchFrame[]) => {
-    setSelectedSong(song);
-    setReferencePitch(frames);
+  const resetCompare = () => {
+    setCompareResult(null);
+    setCompareStatus('idle');
+    setCompareError('');
   };
 
+  const resetFeedback = () => {
+    setFeedbackResult(null);
+    setFeedbackStatus('idle');
+    setFeedbackError('');
+  };
+
+  // ── API 호출 ──────────────────────────────────────────────────────────────
+
   const runFeedback = useCallback(async (
-    uploadResult: UploadResponse,
-    compareData: CompareResponse,
+    upload: UploadResponse,
+    compare: CompareResponse,
   ) => {
     setFeedbackStatus('loading');
     setFeedbackError('');
     setFeedbackResult(null);
 
     try {
-      const response = await fetch(FEEDBACK_URL, {
+      const res = await fetch(FEEDBACK_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          duration_sec: uploadResult.duration_sec,
-          pitch_summary: uploadResult.summary,
-          judgement: compareData.judgement,
-          alignment: compareData.alignment,
-          filename: uploadResult.filename,
+          duration_sec:  upload.duration_sec,
+          pitch_summary: upload.summary,
+          judgement:     compare.judgement,
+          alignment:     compare.alignment,
+          filename:      upload.filename,
         }),
       });
 
-      if (!response.ok) {
-        const errorBody = await response
-          .json()
-          .catch(() => ({ detail: 'AI 피드백 요청 중 오류가 발생했습니다.' }));
-        throw new Error(errorBody.detail ?? `HTTP ${response.status}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: 'AI 피드백 요청 중 오류가 발생했습니다.' }));
+        throw new Error(err.detail ?? `HTTP ${res.status}`);
       }
 
-      const data: FeedbackApiResponse = await response.json();
+      const data: FeedbackApiResponse = await res.json();
       setFeedbackResult(data.feedback);
       setFeedbackStatus('success');
-    } catch (error) {
+    } catch (e) {
       setFeedbackStatus('error');
-      setFeedbackError(getErrorMessage(error));
+      setFeedbackError(getErrorMessage(e));
     }
   }, []);
 
-  const runCompare = useCallback(async (uploadResult: UploadResponse, demo: boolean) => {
+  const runCompare = useCallback(async (upload: UploadResponse, demo: boolean) => {
     setCompareStatus('loading');
     setCompareError('');
     setCompareResult(null);
-    setFeedbackStatus('idle');
-    setFeedbackResult(null);
+    resetFeedback();
 
     if (demo) {
-      setCompareResult(DUMMY_COMPARE);
+      setCompareResult(DEMO_COMPARE);
       setCompareStatus('success');
-      setFeedbackResult(DUMMY_FEEDBACK);
+      setFeedbackResult(DEMO_FEEDBACK);
       setFeedbackStatus('success');
       return;
     }
 
-    const ref = referencePitch ?? [];
-
     try {
-      const response = await fetch(COMPARE_URL, {
+      const res = await fetch(COMPARE_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_pitch: uploadResult.pitch,
-          reference_pitch: ref,
+          user_pitch:      upload.pitch,
+          reference_pitch: referencePitch ?? [],
         }),
       });
 
-      if (!response.ok) {
-        const errorBody = await response
-          .json()
-          .catch(() => ({ detail: '비교 중 알 수 없는 오류가 발생했습니다.' }));
-        throw new Error(errorBody.detail ?? `HTTP ${response.status}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: '비교 중 알 수 없는 오류가 발생했습니다.' }));
+        throw new Error(err.detail ?? `HTTP ${res.status}`);
       }
 
-      const data: CompareResponse = await response.json();
+      const data: CompareResponse = await res.json();
       setCompareResult(data);
       setCompareStatus('success');
-      await runFeedback(uploadResult, data);
-    } catch (error) {
+      await runFeedback(upload, data);
+    } catch (e) {
       setCompareStatus('error');
-      setCompareError(getErrorMessage(error));
+      setCompareError(getErrorMessage(e));
     }
   }, [referencePitch, runFeedback]);
 
-  const handleSuccess = (result: UploadResponse) => {
+  // ── 이벤트 핸들러 ────────────────────────────────────────────────────────
+
+  const handleSongSelect = (song: SongMeta, frames: ReferencePitchFrame[]) => {
+    setSelectedSong(song);
+    setReferencePitch(frames);
+  };
+
+  const handleUploadSuccess = (result: UploadResponse) => {
     setIsDemo(false);
     setAnalysisResult(result);
-    setCompareResult(null);
-    setCompareStatus('idle');
-    setCompareError('');
-    setFeedbackResult(null);
-    setFeedbackStatus('idle');
-    setFeedbackError('');
+    resetCompare();
+    resetFeedback();
+  };
+
+  const handleDemo = () => {
+    setIsDemo(true);
+    setAnalysisResult(DEMO_UPLOAD);
+    resetCompare();
+    resetFeedback();
   };
 
   const handleReset = () => {
     setIsDemo(false);
     setAnalysisResult(null);
-    setCompareResult(null);
-    setCompareStatus('idle');
-    setCompareError('');
-    setFeedbackResult(null);
-    setFeedbackStatus('idle');
-    setFeedbackError('');
+    setRecordedAudioUrl(null);
+    resetCompare();
+    resetFeedback();
   };
 
-  const handleDemo = () => {
-    setIsDemo(true);
-    setAnalysisResult(DUMMY_RESULT);
-    setCompareResult(null);
-    setCompareStatus('idle');
-    setCompareError('');
-    setFeedbackResult(null);
-    setFeedbackStatus('idle');
-    setFeedbackError('');
-  };
+  const handleRetryCompare  = () => analysisResult && runCompare(analysisResult, isDemo);
+  const handleRetryFeedback = () => analysisResult && compareResult && runFeedback(analysisResult, compareResult);
 
-  const handleRetryCompare = () => {
-    if (!analysisResult) return;
-    runCompare(analysisResult, isDemo);
-  };
-
-  const handleRetryFeedback = () => {
-    if (!analysisResult || !compareResult) return;
-    runFeedback(analysisResult, compareResult);
-  };
-
+  // 업로드 완료 시 자동 비교 시작
   useEffect(() => {
     if (!analysisResult) return;
     runCompare(analysisResult, isDemo);
+  // runCompare는 analysisResult 변경 시에만 실행하면 되므로 의존성에서 제외
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysisResult]);
+
+  // ── 렌더 ──────────────────────────────────────────────────────────────────
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-50 py-10">
@@ -261,11 +194,10 @@ export default function Home() {
         </p>
 
         {!analysisResult ? (
+          /* ── 녹음 전 화면 ── */
           <>
-            {/* 곡 선택 */}
             <SongSelector onSelect={handleSongSelect} />
 
-            {/* 선택된 곡 표시 */}
             {selectedSong && (
               <div className="flex w-full items-center gap-2 rounded-lg bg-indigo-50 px-4 py-2.5 text-sm">
                 <span className="text-indigo-500">🎵</span>
@@ -274,7 +206,10 @@ export default function Home() {
               </div>
             )}
 
-            <VoiceRecorder onUploadSuccess={handleSuccess} />
+            <VoiceRecorder
+              onUploadSuccess={handleUploadSuccess}
+              onAudioReady={setRecordedAudioUrl}
+            />
 
             <button
               onClick={handleDemo}
@@ -284,6 +219,7 @@ export default function Home() {
             </button>
           </>
         ) : (
+          /* ── 분석 결과 화면 ── */
           <div className="flex w-full flex-col gap-6">
 
             {/* 분석 요약 */}
@@ -292,7 +228,7 @@ export default function Home() {
               summary={analysisResult.summary}
             />
 
-            {/* 핵심 지표 (8주차) */}
+            {/* 핵심 지표 */}
             {compareResult && (
               <MetricsReport
                 judgement={compareResult.judgement}
@@ -310,6 +246,11 @@ export default function Home() {
                     <p className="text-sm text-zinc-500">
                       {selectedSong ? `기준곡: ${selectedSong.title}` : '기준 melody와 음정을 비교합니다.'}
                     </p>
+                    {compareResult?.detected_offset_sec != null && compareResult.detected_offset_sec > 1 && (
+                      <p className="mt-0.5 text-xs text-indigo-500">
+                        🔍 기준곡 {compareResult.detected_offset_sec.toFixed(1)}초 지점부터 매칭됨
+                      </p>
+                    )}
                   </div>
                   {compareStatus === 'loading' && (
                     <div className="flex items-center gap-2 text-sm text-zinc-500">
@@ -322,7 +263,8 @@ export default function Home() {
                 {compareStatus === 'success' && compareResult ? (
                   <CompareSummary
                     summary={compareResult.judgement}
-                    errorSegments={compareResult.error_segments}
+                    phraseResults={compareResult.phrase_results}
+                    audioUrl={recordedAudioUrl ?? undefined}
                   />
                 ) : compareStatus === 'error' ? (
                   <div className="flex flex-col gap-3 rounded-lg border border-red-200 bg-red-50 p-4">
@@ -368,7 +310,11 @@ export default function Home() {
               </div>
               {feedbackStatus === 'loading' && <FeedbackLoading />}
               {feedbackStatus === 'success' && feedbackResult && (
-                <FeedbackReport feedback={feedbackResult} />
+                <FeedbackReport
+                  feedback={feedbackResult}
+                  phraseResults={compareResult?.phrase_results}
+                  audioUrl={recordedAudioUrl ?? undefined}
+                />
               )}
               {feedbackStatus === 'error' && (
                 <FeedbackError message={feedbackError} onRetry={handleRetryFeedback} />

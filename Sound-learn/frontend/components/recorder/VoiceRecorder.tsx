@@ -68,7 +68,7 @@ function formatElapsed(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export default function VoiceRecorder({ onUploadSuccess, onUploadError }: VoiceRecorderProps) {
+export default function VoiceRecorder({ onUploadSuccess, onUploadError, onAudioReady }: VoiceRecorderProps) {
   const [recordingState, setRecordingState] = useState<RecordingState>('idle');
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [isUploading, setIsUploading] = useState(false);
@@ -158,6 +158,8 @@ export default function VoiceRecorder({ onUploadSuccess, onUploadError }: VoiceR
 
     recorder.onstop = () => {
       const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+      // 브라우저 재생용 URL 생성 → 오류 구간 재생에 사용
+      onAudioReady?.(URL.createObjectURL(blob));
       uploadAudio(blob);
 
       // 스트림 트랙 해제
@@ -202,9 +204,11 @@ export default function VoiceRecorder({ onUploadSuccess, onUploadError }: VoiceR
       // 입력 초기화 (같은 파일 재선택 허용)
       e.target.value = '';
 
+      // 브라우저 재생용 URL 생성
+      onAudioReady?.(URL.createObjectURL(file));
       uploadAudio(file, file.name);
     },
-    [uploadAudio],
+    [uploadAudio, onAudioReady],
   );
 
   const handleRetry = useCallback(() => {

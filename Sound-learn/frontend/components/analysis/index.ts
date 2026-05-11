@@ -9,5 +9,5 @@ export type {
   CompareResponse,
   AlignmentFrame,
   JudgementSummary,
-  ErrorSegment,
+  PhraseResult,
 } from './types';

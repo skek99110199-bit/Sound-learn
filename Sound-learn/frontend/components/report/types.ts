@@ -21,6 +21,8 @@ export interface FeedbackApiResponse {
 
 export interface FeedbackReportProps {
   feedback: FeedbackResponse;
+  phraseResults?: import('@/components/analysis').PhraseResult[];
+  audioUrl?: string;
 }
 
 export interface FeedbackErrorProps {

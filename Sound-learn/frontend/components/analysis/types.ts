@@ -27,13 +27,17 @@ export interface JudgementSummary {
   max_abs_timing_error_sec: number | null;
 }
 
-export interface ErrorSegment {
-  start_time: number;
-  end_time: number;
-  avg_cent_error: number;
-  max_abs_cent_error: number;
+export interface PhraseResult {
+  index: number;
+  ref_start_time: number;
+  ref_end_time: number;
+  user_start_time: number;
+  user_end_time: number;
+  accuracy_percent: number;
+  avg_cent_error: number | null;
   direction: 'sharp' | 'flat' | 'mixed';
   frame_count: number;
+  is_good: boolean;
 }
 
 export interface CompareResponse {
@@ -41,7 +45,8 @@ export interface CompareResponse {
   reference_pitch: PitchFrame[];
   alignment: AlignmentFrame[];
   judgement: JudgementSummary;
-  error_segments: ErrorSegment[];
+  phrase_results: PhraseResult[];
+  detected_offset_sec?: number | null;
 }
 
 export interface PianoRollProps {

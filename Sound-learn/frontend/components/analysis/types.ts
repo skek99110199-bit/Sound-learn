@@ -7,6 +7,7 @@ export interface PitchFrame {
 export interface AlignmentFrame {
   user_time: number;
   reference_time: number;
+  timing_error_sec: number;
   user_midi: number;
   reference_midi: number;
   user_frequency: number;
@@ -22,6 +23,17 @@ export interface JudgementSummary {
   avg_cent_error: number | null;
   max_positive_cent_error: number | null;
   max_negative_cent_error: number | null;
+  avg_abs_timing_error_sec: number | null;
+  max_abs_timing_error_sec: number | null;
+}
+
+export interface ErrorSegment {
+  start_time: number;
+  end_time: number;
+  avg_cent_error: number;
+  max_abs_cent_error: number;
+  direction: 'sharp' | 'flat' | 'mixed';
+  frame_count: number;
 }
 
 export interface CompareResponse {
@@ -29,6 +41,7 @@ export interface CompareResponse {
   reference_pitch: PitchFrame[];
   alignment: AlignmentFrame[];
   judgement: JudgementSummary;
+  error_segments: ErrorSegment[];
 }
 
 export interface PianoRollProps {

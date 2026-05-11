@@ -288,7 +288,10 @@ export default function Home() {
                 </div>
 
                 {compareStatus === 'success' && compareResult ? (
-                  <CompareSummary summary={compareResult.judgement} />
+                  <CompareSummary
+                    summary={compareResult.judgement}
+                    errorSegments={compareResult.error_segments}
+                  />
                 ) : compareStatus === 'error' ? (
                   <div className="flex flex-col gap-3 rounded-lg border border-red-200 bg-red-50 p-4">
                     <p className="text-sm text-red-600">

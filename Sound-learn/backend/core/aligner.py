@@ -2,12 +2,14 @@ import math
 
 
 def midi_to_hz(midi_note: float) -> float:
-    """MIDI note number를 Hz로 변환한다."""
+    """Convert a MIDI note number to frequency in Hz."""
     return 440.0 * (2 ** ((midi_note - 69.0) / 12.0))
 
 
 def calculate_cent_error(user_freq: float, reference_freq: float) -> float:
-    """두 주파수 간 cent 오차를 계산한다."""
+    """Return the signed cent difference between two positive frequencies."""
+    if user_freq <= 0 or reference_freq <= 0:
+        raise ValueError("Frequencies must be positive to calculate cent error.")
     return 1200.0 * math.log2(user_freq / reference_freq)
 
 
@@ -15,12 +17,7 @@ def align_midi_sequences(
     user_notes: list[float],
     reference_notes: list[float],
 ) -> list[tuple[int, int]]:
-    """
-    두 MIDI 시퀀스를 DTW로 정렬한다.
-
-    Returns:
-        (user_index, reference_index) 쌍의 경로 리스트
-    """
+    """Align two MIDI sequences with Dynamic Time Warping."""
     if not user_notes or not reference_notes:
         return []
 
@@ -52,7 +49,6 @@ def align_midi_sequences(
         if prev is None:
             break
 
-        # 대각선/수직/수평 이동 모두 기록 (이전 코드는 대각선만 기록하는 버그 있었음)
         path.append((i - 1, j - 1))
         i, j = prev
 

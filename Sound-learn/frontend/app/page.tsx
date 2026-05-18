@@ -11,18 +11,22 @@ import { SongSelector } from '@/components/songs';
 import type { SongMeta, ReferencePitchFrame } from '@/components/songs';
 import { DEMO_UPLOAD, DEMO_COMPARE, DEMO_FEEDBACK } from '@/lib/demoData';
 
+// 환경 변수에서 백엔드 URL을 읽어옴 (없으면 로컬 개발 서버 주소 사용)
 const API_URL     = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 const COMPARE_URL = `${API_URL}/api/compare`;
 const FEEDBACK_URL = `${API_URL}/api/feedback`;
 
+/** API 상태를 나타내는 공용 타입 */
 type AsyncStatus = 'idle' | 'loading' | 'success' | 'error';
 
+/** Error 객체와 일반 값 모두 처리하는 메시지 추출 헬퍼 */
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return '요청에 실패했습니다.';
 }
 
-// ── 초기 상태 ─────────────────────────────────────────────────────────────────
+// ── 초기 상태 상수 ─────────────────────────────────────────────────────────────
+// resetCompare / resetFeedback 에서 재사용하기 위해 상수로 분리
 
 const INITIAL_COMPARE_STATE = {
   result: null as CompareResponse | null,
@@ -39,21 +43,30 @@ const INITIAL_FEEDBACK_STATE = {
 // ── 메인 컴포넌트 ─────────────────────────────────────────────────────────────
 
 export default function Home() {
+  // ── 기준곡 상태 ───────────────────────────────────────────────────────────
   const [selectedSong,    setSelectedSong]    = useState<SongMeta | null>(null);
   const [referencePitch,  setReferencePitch]  = useState<ReferencePitchFrame[] | null>(null);
+
+  // ── 녹음/업로드 결과 ──────────────────────────────────────────────────────
+  // analysisResult: 백엔드 /api/upload 응답 (pitch 배열, duration 등)
+  // recordedAudioUrl: 브라우저에서 생성한 Blob URL (소절 재생에 사용)
+  // isDemo: 데모 데이터 사용 여부
   const [analysisResult,  setAnalysisResult]  = useState<UploadResponse | null>(null);
   const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null);
   const [isDemo,          setIsDemo]          = useState(false);
 
+  // ── 비교 API 상태 (/api/compare) ─────────────────────────────────────────
   const [compareResult, setCompareResult] = useState(INITIAL_COMPARE_STATE.result);
   const [compareStatus, setCompareStatus] = useState(INITIAL_COMPARE_STATE.status);
   const [compareError,  setCompareError]  = useState(INITIAL_COMPARE_STATE.error);
 
+  // ── AI 피드백 API 상태 (/api/feedback) ────────────────────────────────────
   const [feedbackResult, setFeedbackResult] = useState(INITIAL_FEEDBACK_STATE.result);
   const [feedbackStatus, setFeedbackStatus] = useState(INITIAL_FEEDBACK_STATE.status);
   const [feedbackError,  setFeedbackError]  = useState(INITIAL_FEEDBACK_STATE.error);
 
   // ── 상태 초기화 헬퍼 ────────────────────────────────────────────────────────
+  // 새 녹음 시작 / 재시도 시 이전 결과를 초기화하기 위해 분리
 
   const resetCompare = () => {
     setCompareResult(null);
@@ -69,6 +82,12 @@ export default function Home() {
 
   // ── API 호출 ──────────────────────────────────────────────────────────────
 
+  /**
+   * AI 피드백 API 호출 (/api/feedback)
+   * 비교 결과(compare)와 업로드 정보(upload)를 함께 보내
+   * GPT 기반 음성 피드백 텍스트를 받아온다.
+   * runCompare 내부에서 자동으로 호출되며, 실패 시 재시도 버튼으로도 호출된다.
+   */
   const runFeedback = useCallback(async (
     upload: UploadResponse,
     compare: CompareResponse,
@@ -104,12 +123,20 @@ export default function Home() {
     }
   }, []);
 
+  /**
+   * 비교 API 호출 (/api/compare) + 이후 자동으로 피드백 API 호출
+   *
+   * 데모 모드면 네트워크 없이 더미 데이터를 바로 설정한다.
+   * 실제 모드에서는 사용자 pitch와 레퍼런스 pitch를 서버로 보내
+   * DTW 정렬 + 소절 분석 결과를 받아온다.
+   */
   const runCompare = useCallback(async (upload: UploadResponse, demo: boolean) => {
     setCompareStatus('loading');
     setCompareError('');
     setCompareResult(null);
     resetFeedback();
 
+    // 데모 모드: 백엔드 없이 더미 데이터로 즉시 화면 완성
     if (demo) {
       setCompareResult(DEMO_COMPARE);
       setCompareStatus('success');
@@ -124,6 +151,7 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_pitch:      upload.pitch,
+          // 기준곡 미선택 시 빈 배열 → 서버에서 422 에러 반환됨
           reference_pitch: referencePitch ?? [],
         }),
       });
@@ -136,6 +164,7 @@ export default function Home() {
       const data: CompareResponse = await res.json();
       setCompareResult(data);
       setCompareStatus('success');
+      // 비교 완료 후 자동으로 AI 피드백 요청
       await runFeedback(upload, data);
     } catch (e) {
       setCompareStatus('error');
@@ -145,11 +174,13 @@ export default function Home() {
 
   // ── 이벤트 핸들러 ────────────────────────────────────────────────────────
 
+  /** SongSelector에서 기준곡 선택 시 호출 — 기준 pitch 저장 */
   const handleSongSelect = (song: SongMeta, frames: ReferencePitchFrame[]) => {
     setSelectedSong(song);
     setReferencePitch(frames);
   };
 
+  /** VoiceRecorder 업로드 완료 시 호출 — 비교·피드백 초기화 후 결과 저장 */
   const handleUploadSuccess = (result: UploadResponse) => {
     setIsDemo(false);
     setAnalysisResult(result);
@@ -157,6 +188,7 @@ export default function Home() {
     resetFeedback();
   };
 
+  /** "데모 데이터로 미리보기" 버튼 클릭 — 더미 데이터로 UI 채우기 */
   const handleDemo = () => {
     setIsDemo(true);
     setAnalysisResult(DEMO_UPLOAD);
@@ -164,6 +196,7 @@ export default function Home() {
     resetFeedback();
   };
 
+  /** "다시 녹음" 버튼 클릭 — 모든 상태 초기화 후 녹음 화면으로 복귀 */
   const handleReset = () => {
     setIsDemo(false);
     setAnalysisResult(null);
@@ -172,15 +205,18 @@ export default function Home() {
     resetFeedback();
   };
 
+  /** 비교 재시도 버튼 — analysisResult가 있을 때만 실행 */
   const handleRetryCompare  = () => analysisResult && runCompare(analysisResult, isDemo);
+  /** 피드백 재시도 버튼 — 비교 결과도 있어야 실행 가능 */
   const handleRetryFeedback = () => analysisResult && compareResult && runFeedback(analysisResult, compareResult);
 
-  // 업로드 완료 시 자동 비교 시작
+  // analysisResult가 바뀔 때마다 자동으로 비교 시작
+  // (녹음 완료 → handleUploadSuccess → analysisResult 세팅 → 이 effect 실행)
+  // runCompare는 analysisResult 변경 시에만 실행하면 되므로 의존성에서 제외
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!analysisResult) return;
     runCompare(analysisResult, isDemo);
-  // runCompare는 analysisResult 변경 시에만 실행하면 되므로 의존성에서 제외
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysisResult]);
 
   // ── 렌더 ──────────────────────────────────────────────────────────────────

@@ -1,22 +1,32 @@
 'use client';
 
+/**
+ * CompareSummary — 비교 분석 결과 표시 컴포넌트
+ *
+ * 구성:
+ *  1. 전체 수치 요약 카드 (정확도, 정답 프레임, 음정 오차, 박자 오차)
+ *  2. 소절별 PhraseCard 목록 — 각 소절의 정확도 바, 방향성, 재생 버튼
+ */
+
 import { useEffect, useRef, useState } from 'react';
 import type { JudgementSummary, PhraseResult } from './types';
 
 interface CompareSummaryProps {
-  summary: JudgementSummary;
-  phraseResults?: PhraseResult[];
-  audioUrl?: string;
+  summary: JudgementSummary;       // 전체 통계 (정확도, cent 오차 등)
+  phraseResults?: PhraseResult[];  // 소절별 결과 목록
+  audioUrl?: string;               // 브라우저 Blob URL — 없으면 재생 버튼 미표시
 }
 
-// ── 유틸 ─────────────────────────────────────────────────────────────────────
+// ── 포맷 유틸 ─────────────────────────────────────────────────────────────────
 
+/** cent 값을 "+12.3 cent" 형식의 문자열로 변환 */
 function formatCent(value: number | null): string {
   if (value === null) return '-';
   const r = Math.round(value * 10) / 10;
   return `${r > 0 ? '+' : ''}${r.toFixed(1)} cent`;
 }
 
+/** 초 단위 값을 "123ms" 형식으로 변환 (박자 오차 표시) */
 function formatSec(value: number | null): string {
   if (value === null) return '-';
   return `${(value * 1000).toFixed(0)}ms`;
@@ -24,12 +34,14 @@ function formatSec(value: number | null): string {
 
 // ── 소절 카드 ─────────────────────────────────────────────────────────────────
 
+/** 음정 방향별 라벨·설명·색상 매핑 */
 const DIRECTION_INFO = {
   sharp: { label: '♯ 높음', tip: '음정을 조금 낮춰 보세요.', color: 'text-red-600' },
   flat:  { label: '♭ 낮음', tip: '음정을 조금 높여 보세요.', color: 'text-blue-600' },
   mixed: { label: '불안정', tip: '음정 유지를 연습해 보세요.', color: 'text-amber-600' },
 };
 
+/** 정확도(%)를 가로 막대 그래프로 시각화 — 80%↑ 초록, 60%↑ 노랑, 그 이하 빨강 */
 function AccuracyBar({ percent }: { percent: number }) {
   const color =
     percent >= 80 ? 'bg-emerald-400' :
@@ -46,22 +58,33 @@ function AccuracyBar({ percent }: { percent: number }) {
 
 interface PhraseCardProps {
   result: PhraseResult;
-  audioUrl?: string;
-  currentlyPlaying: number | null;
-  onPlay: (index: number) => void;
-  onStop: () => void;
+  audioUrl?: string;               // 소절 재생에 사용할 Blob URL
+  currentlyPlaying: number | null; // 현재 재생 중인 소절 index (없으면 null)
+  onPlay: (index: number) => void; // 재생 시작 콜백 — 부모가 currentlyPlaying 갱신
+  onStop: () => void;              // 재생 중지 콜백
 }
 
+/**
+ * 소절 한 개의 분석 카드.
+ *
+ * 오디오 재생 원리:
+ *  - HTMLAudioElement를 ref로 관리해 컴포넌트 재렌더 시에도 유지
+ *  - currentTime을 user_start_time으로 이동 후 play()
+ *  - timeupdate 이벤트로 user_end_time 도달 여부를 감시해 자동 정지
+ *  - 다른 소절이 재생되면 (isPlaying=false) pause() 호출
+ */
 function PhraseCard({ result, audioUrl, currentlyPlaying, onPlay, onStop }: PhraseCardProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const isPlaying = currentlyPlaying === result.index;
   const dir = DIRECTION_INFO[result.direction];
 
+  // 다른 소절이 재생될 때 현재 오디오 일시정지
   useEffect(() => {
     if (!isPlaying) audioRef.current?.pause();
   }, [isPlaying]);
 
   const handleToggle = () => {
+    // 이미 재생 중이면 정지
     if (isPlaying) {
       audioRef.current?.pause();
       onStop();
@@ -69,12 +92,16 @@ function PhraseCard({ result, audioUrl, currentlyPlaying, onPlay, onStop }: Phra
     }
     if (!audioUrl) return;
 
+    // Audio 객체는 처음 한 번만 생성 (매 클릭마다 새로 만들지 않음)
     if (!audioRef.current) audioRef.current = new Audio(audioUrl);
     const audio = audioRef.current;
+
+    // 소절 시작 지점으로 이동 후 재생
     audio.currentTime = result.user_start_time;
     audio.play();
     onPlay(result.index);
 
+    // timeupdate 이벤트: 소절 끝 지점 도달 시 자동 정지
     const check = () => {
       if (audio.currentTime >= result.user_end_time) {
         audio.pause();
@@ -83,6 +110,7 @@ function PhraseCard({ result, audioUrl, currentlyPlaying, onPlay, onStop }: Phra
       }
     };
     audio.addEventListener('timeupdate', check);
+    // 오디오 파일 자체가 끝났을 때도 정지
     audio.onended = () => onStop();
   };
 
@@ -159,8 +187,11 @@ function PhraseCard({ result, audioUrl, currentlyPlaying, onPlay, onStop }: Phra
 // ── 메인 컴포넌트 ─────────────────────────────────────────────────────────────
 
 export default function CompareSummary({ summary, phraseResults, audioUrl }: CompareSummaryProps) {
+  // currentlyPlaying: 재생 중인 소절 index. null이면 아무것도 재생 안 함.
+  // 여러 소절이 동시에 재생되지 않도록 단일 상태로 관리.
   const [currentlyPlaying, setCurrentlyPlaying] = useState<number | null>(null);
 
+  // 상단 요약 카드에 표시할 지표 목록
   const metrics = [
     { label: '전체 정확도',   value: `${summary.accuracy_percent.toFixed(1)}%`, tone: 'text-emerald-600' },
     { label: '정답 프레임',   value: `${summary.correct_frames} / ${summary.total_compared_frames}`, tone: 'text-zinc-800' },
@@ -168,6 +199,7 @@ export default function CompareSummary({ summary, phraseResults, audioUrl }: Com
     { label: '평균 박자 오차', value: formatSec(summary.avg_abs_timing_error_sec), tone: 'text-zinc-800' },
   ];
 
+  // "N/M 소절 통과" 표시용 카운트
   const goodCount = phraseResults?.filter((p) => p.is_good).length ?? 0;
   const totalCount = phraseResults?.length ?? 0;
 

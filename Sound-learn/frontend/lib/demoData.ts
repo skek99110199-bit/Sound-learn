@@ -1,6 +1,12 @@
 /**
  * 백엔드 없이 프론트엔드만 테스트할 때 사용하는 더미 데이터.
  * 실제 서비스에서는 사용되지 않는다.
+ *
+ * 사용처: page.tsx의 "데모 데이터로 미리보기" 버튼 → handleDemo()
+ *
+ * DEMO_UPLOAD  — /api/upload 응답 형식 (pitch 배열, 음역대 요약)
+ * DEMO_COMPARE — /api/compare 응답 형식 (정렬 결과, 소절 분석)
+ * DEMO_FEEDBACK — /api/feedback 응답 형식 (AI 텍스트 피드백)
  */
 
 import type { UploadResponse } from '@/components/recorder';

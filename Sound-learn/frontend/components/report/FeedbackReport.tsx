@@ -1,9 +1,23 @@
 'use client';
 
+/**
+ * FeedbackReport — AI 피드백 표시 컴포넌트
+ *
+ * 구성:
+ *  1. 점수 배지 (excellent / good / needs_practice / poor)
+ *  2. 총평 텍스트
+ *  3. 잘한 점 / 개선할 점 / 연습 방법 목록
+ *  4. 집중 연습 구간 — is_good=false인 소절 카드 (재생 버튼 포함)
+ *
+ * 소절 카드는 CompareSummary의 PhraseCard와 구조는 동일하나
+ * 스타일이 다르므로 별도로 정의한다.
+ */
+
 import { useEffect, useRef, useState } from 'react';
 import type { PhraseResult } from '@/components/analysis';
 import type { FeedbackReportProps } from './types';
 
+/** score_label별 색상·이모지·라벨 설정 */
 const SCORE_CONFIG = {
   excellent:     { label: '훌륭해요',      emoji: '🌟', bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', badge: 'bg-emerald-100 text-emerald-700' },
   good:          { label: '잘했어요',      emoji: '👍', bg: 'bg-blue-50',    border: 'border-blue-200',    text: 'text-blue-700',    badge: 'bg-blue-100 text-blue-700'    },
@@ -11,27 +25,34 @@ const SCORE_CONFIG = {
   poor:          { label: '많은 연습 필요', emoji: '🎯', bg: 'bg-red-50',    border: 'border-red-200',     text: 'text-red-700',     badge: 'bg-red-100 text-red-700'      },
 } as const;
 
+/** 음정 방향별 라벨·설명·색상 (정확도 바 색상 포함) */
 const DIRECTION_INFO = {
   sharp: { label: '♯ 높음', tip: '음정을 조금 낮춰 보세요.', color: 'text-red-600',  bar: 'bg-red-400'  },
   flat:  { label: '♭ 낮음', tip: '음정을 조금 높여 보세요.', color: 'text-blue-600', bar: 'bg-blue-400' },
   mixed: { label: '불안정',  tip: '음정 유지를 연습해 보세요.', color: 'text-amber-600', bar: 'bg-amber-400' },
 };
 
-// ── 소절 카드 (재생 포함) ─────────────────────────────────────────────────────
+// ── 소절 카드 (집중 연습 구간용) ──────────────────────────────────────────────
 
 interface PhraseCardProps {
   result: PhraseResult;
-  audioUrl?: string;
-  currentlyPlaying: number | null;
+  audioUrl?: string;               // 재생에 사용할 Blob URL
+  currentlyPlaying: number | null; // 현재 재생 중인 소절 index
   onPlay: (i: number) => void;
   onStop: () => void;
 }
 
+/**
+ * 집중 연습이 필요한 소절 카드 (is_good=false인 소절에만 표시).
+ * 오디오 재생 로직은 CompareSummary의 PhraseCard와 동일하다.
+ * (user_start_time ~ user_end_time 구간을 HTMLAudioElement로 재생)
+ */
 function PhraseCard({ result, audioUrl, currentlyPlaying, onPlay, onStop }: PhraseCardProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const isPlaying = currentlyPlaying === result.index;
   const dir = DIRECTION_INFO[result.direction];
 
+  // 다른 소절 재생 시 현재 오디오 정지
   useEffect(() => {
     if (!isPlaying) audioRef.current?.pause();
   }, [isPlaying]);
@@ -41,9 +62,10 @@ function PhraseCard({ result, audioUrl, currentlyPlaying, onPlay, onStop }: Phra
     if (!audioUrl) return;
     if (!audioRef.current) audioRef.current = new Audio(audioUrl);
     const audio = audioRef.current;
-    audio.currentTime = result.user_start_time;
+    audio.currentTime = result.user_start_time;  // 소절 시작 지점으로 이동
     audio.play();
     onPlay(result.index);
+    // 소절 끝 지점 도달 시 자동 정지
     const check = () => {
       if (audio.currentTime >= result.user_end_time) {
         audio.pause(); onStop();
@@ -98,10 +120,12 @@ function PhraseCard({ result, audioUrl, currentlyPlaying, onPlay, onStop }: Phra
 // ── 메인 ─────────────────────────────────────────────────────────────────────
 
 export default function FeedbackReport({ feedback, phraseResults, audioUrl }: FeedbackReportProps) {
+  // score_label에 맞는 색상·이모지 설정 가져오기 (없으면 'good' 기본값)
   const config = SCORE_CONFIG[feedback.score_label] ?? SCORE_CONFIG.good;
+  // 재생 중인 소절 index — null이면 재생 없음
   const [currentlyPlaying, setCurrentlyPlaying] = useState<number | null>(null);
 
-  // 개선이 필요한 소절만 필터링
+  // is_good=false인 소절만 "집중 연습 구간"으로 표시
   const badPhrases = phraseResults?.filter((p) => !p.is_good) ?? [];
 
   return (

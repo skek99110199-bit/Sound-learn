@@ -1,5 +1,16 @@
 'use client';
 
+/**
+ * SongSelector — 기준곡 선택 컴포넌트
+ *
+ * 두 가지 방식으로 기준 melody를 로드한다:
+ *  1. 파일 업로드 탭: WAV/MP3 등 오디오 파일 → POST /api/songs/upload-reference
+ *  2. YouTube 탭: YouTube URL 입력 → POST /api/songs/youtube (yt-dlp 사용)
+ *
+ * 두 방식 모두 서버에서 pitch 추출 후 ReferencePitchFrame[] 배열을 반환받아
+ * onSelect 콜백으로 부모(page.tsx)에 전달한다.
+ */
+
 import { useRef, useState } from 'react';
 import type { SongMeta, SongSelectorProps } from './types';
 
@@ -7,20 +18,27 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 type Tab = 'file' | 'youtube';
 
+/** 파일 선택 input에 허용할 확장자 */
 const ACCEPTED = '.wav,.mp3,.m4a,.flac,.ogg';
 
 export default function SongSelector({ onSelect }: SongSelectorProps) {
   const [tab, setTab] = useState<Tab>('file');
 
-  // ── 파일 업로드 탭 ────────────────────────────────────────────────────────────
+  // ── 파일 업로드 탭 상태 ───────────────────────────────────────────────────────
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [fileLoading, setFileLoading] = useState(false);
   const [fileError, setFileError] = useState('');
-  const [fileTitle, setFileTitle] = useState('');
+  const [fileTitle, setFileTitle] = useState('');  // 성공 시 표시할 파일명
 
+  /**
+   * 파일 선택 후 처리:
+   *  1. FormData로 서버에 전송 (multipart/form-data)
+   *  2. 서버가 pitch 추출 후 { title, frames } 반환
+   *  3. onSelect로 부모에 전달
+   */
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    e.target.value = '';
+    e.target.value = '';  // 같은 파일 재선택이 가능하도록 입력값 초기화
     if (!file) return;
 
     setFileLoading(true);
@@ -40,7 +58,7 @@ export default function SongSelector({ onSelect }: SongSelectorProps) {
 
       setFileTitle(data.title);
       const song: SongMeta = { id: 'upload', title: data.title, artist: '업로드 파일' };
-      onSelect(song, data.frames);
+      onSelect(song, data.frames);  // 부모에 기준곡 정보 전달
     } catch (e) {
       setFileError(e instanceof Error ? e.message : '업로드 실패');
     } finally {
@@ -48,12 +66,18 @@ export default function SongSelector({ onSelect }: SongSelectorProps) {
     }
   };
 
-  // ── YouTube 탭 ────────────────────────────────────────────────────────────────
+  // ── YouTube 탭 상태 ───────────────────────────────────────────────────────────
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [ytLoading, setYtLoading] = useState(false);
   const [ytError, setYtError] = useState('');
-  const [ytTitle, setYtTitle] = useState('');
+  const [ytTitle, setYtTitle] = useState('');  // 성공 시 표시할 영상 제목
 
+  /**
+   * YouTube URL로 기준곡 로드:
+   *  1. URL을 서버로 전송
+   *  2. 서버가 yt-dlp로 오디오 다운로드 → pitch 추출 (30초~1분 소요)
+   *  3. onSelect로 부모에 전달
+   */
   const handleYoutubeLoad = async () => {
     const url = youtubeUrl.trim();
     if (!url) return;
@@ -79,6 +103,7 @@ export default function SongSelector({ onSelect }: SongSelectorProps) {
     }
   };
 
+  // 어느 탭이든 로딩 중이면 탭 전환 비활성화
   const isLoading = fileLoading || ytLoading;
 
   return (

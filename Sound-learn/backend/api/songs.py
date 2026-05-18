@@ -2,7 +2,14 @@
 
 지원 방식:
   POST /api/songs/upload-reference  — 오디오 파일 업로드 (WAV, MP3 등)
-  POST /api/songs/youtube           — YouTube URL
+  POST /api/songs/youtube           — YouTube URL (yt-dlp + ffmpeg 필요)
+
+처리 흐름:
+  파일 업로드: 임시 파일 저장 → extract_pitch() → voiced frame 필터링 → 반환
+  YouTube   : yt-dlp 다운로드 → WAV 변환 → extract_pitch() → voiced frame 필터링 → 반환
+
+  yt-dlp 호출은 동기 블로킹 함수이므로 asyncio.run_in_executor로 스레드 풀에서 실행한다.
+  (FastAPI의 async 이벤트 루프를 블로킹하지 않기 위함)
 """
 
 import asyncio

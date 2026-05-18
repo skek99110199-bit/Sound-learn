@@ -1,14 +1,26 @@
 'use client';
 
+/**
+ * VoiceRecorder — 마이크 녹음 및 파일 업로드 컴포넌트
+ *
+ * 주요 기능:
+ *  1. MediaRecorder API로 브라우저에서 마이크 녹음 (WebM/Opus)
+ *  2. 녹음된 WebM을 Web Audio API로 WAV 변환 후 서버 업로드
+ *     (서버가 WAV만 받기 때문에 변환 필요)
+ *  3. 파일 선택 모드: 기존 오디오 파일 직접 업로드
+ *  4. onAudioReady 콜백으로 Blob URL 전달 → 소절 재생에 활용
+ *  5. WaveformVisualizer에 AnalyserNode 전달 → 실시간 파형 표시
+ */
+
 import { useCallback, useRef, useState } from 'react';
 import WaveformVisualizer from './WaveformVisualizer';
 import type { RecordingState, UploadResponse, VoiceRecorderProps } from './types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 const UPLOAD_URL = `${API_URL}/api/upload`;
-const FFT_SIZE = 2048;
-const RECORDING_SAMPLE_RATE = 22050;
-const SUCCESS_MESSAGE_DELAY_MS = 900;
+const FFT_SIZE = 2048;                   // Web Audio AnalyserNode FFT 크기 (파형 시각화 해상도)
+const RECORDING_SAMPLE_RATE = 22050;    // WAV 변환 목표 샘플레이트 (22.05kHz — librosa 권장)
+const SUCCESS_MESSAGE_DELAY_MS = 900;   // "분석 완료" 메시지를 잠깐 보여주는 시간 (ms)
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -72,15 +84,25 @@ export default function VoiceRecorder({ onUploadSuccess, onUploadError, onAudioR
   const [recordingState, setRecordingState] = useState<RecordingState>('idle');
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [isUploading, setIsUploading] = useState(false);
+  // analyserNode: WaveformVisualizer에 전달해 실시간 파형을 그림
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const chunksRef = useRef<BlobPart[]>([]);
-  const streamRef = useRef<MediaStream | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // ── ref 관리 ──────────────────────────────────────────────────────────────
+  // ref를 사용하는 이유: 재렌더 없이 값을 유지해야 하거나,
+  //                      비동기 콜백(ondataavailable, onstop)에서 접근해야 하기 때문
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null); // 녹음 제어
+  const audioContextRef  = useRef<AudioContext | null>(null);  // 파형 시각화용 AudioContext
+  const chunksRef        = useRef<BlobPart[]>([]);             // 녹음 데이터 청크 누적
+  const streamRef        = useRef<MediaStream | null>(null);   // 마이크 스트림 (정지 시 해제)
+  const timerRef         = useRef<ReturnType<typeof setInterval> | null>(null); // 녹음 시간 타이머
+  const fileInputRef     = useRef<HTMLInputElement | null>(null); // 숨김 파일 입력
 
+  /**
+   * 오디오 Blob을 서버에 업로드하고 분석 결과를 받아온다.
+   *
+   * WebM 포맷인 경우 convertToWav()로 변환 후 전송한다.
+   * (서버의 librosa는 WAV를 직접 처리하므로 변환 필요)
+   */
   const uploadAudio = useCallback(
     async (blob: Blob, filename = 'recording.wav') => {
       setIsUploading(true);
@@ -89,7 +111,8 @@ export default function VoiceRecorder({ onUploadSuccess, onUploadError, onAudioR
         let uploadBlob: Blob;
         let uploadName: string;
 
-        // WebM이면 WAV 변환, 그 외(WAV/MP3)는 직접 전송
+        // MediaRecorder가 생성한 WebM은 브라우저에서 WAV로 변환
+        // 파일 선택으로 업로드한 WAV/MP3는 그대로 전송
         if (blob.type.includes('webm')) {
           setStatusMessage('WAV 변환 중...');
           uploadBlob = await convertToWav(blob);
@@ -110,6 +133,7 @@ export default function VoiceRecorder({ onUploadSuccess, onUploadError, onAudioR
         }
         const data: UploadResponse = await res.json();
         setStatusMessage(`분석 완료 (${data.duration_sec.toFixed(1)}초)`);
+        // 완료 메시지를 잠깐 보여준 후 콜백 호출
         await delay(SUCCESS_MESSAGE_DELAY_MS);
         onUploadSuccess?.(data);
       } catch (e) {
@@ -123,12 +147,14 @@ export default function VoiceRecorder({ onUploadSuccess, onUploadError, onAudioR
     [onUploadSuccess, onUploadError],
   );
 
+  /** 마이크 녹음 시작 */
   const startRecording = useCallback(async () => {
     setStatusMessage('');
-    chunksRef.current = [];
+    chunksRef.current = [];  // 이전 녹음 데이터 초기화
 
     let stream: MediaStream;
     try {
+      // 브라우저에 마이크 권한 요청
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch {
       setStatusMessage('마이크 접근 권한이 필요합니다.');
@@ -137,32 +163,35 @@ export default function VoiceRecorder({ onUploadSuccess, onUploadError, onAudioR
 
     streamRef.current = stream;
 
-    // Web Audio API — 파형 시각화용
+    // Web Audio API 설정 — AnalyserNode로 실시간 파형 데이터 추출
     const audioCtx = new AudioContext();
     audioContextRef.current = audioCtx;
     const analyser = audioCtx.createAnalyser();
-    analyser.fftSize = FFT_SIZE;
+    analyser.fftSize = FFT_SIZE;  // 클수록 주파수 해상도 높아짐
     audioCtx.createMediaStreamSource(stream).connect(analyser);
-    setAnalyserNode(analyser);
+    setAnalyserNode(analyser);  // WaveformVisualizer에 전달
 
-    // MediaRecorder
+    // MediaRecorder 설정 — Opus 코덱 지원 여부에 따라 mimeType 결정
     const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus'
       : 'audio/webm';
     const recorder = new MediaRecorder(stream, { mimeType });
     mediaRecorderRef.current = recorder;
 
+    // 데이터 청크를 배열에 누적 (recorder.stop() 호출 전까지 계속 쌓임)
     recorder.ondataavailable = (e: BlobEvent) => {
       if (e.data.size > 0) chunksRef.current.push(e.data);
     };
 
+    // 녹음 중지 시: 청크를 Blob으로 합치고 업로드
     recorder.onstop = () => {
       const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-      // 브라우저 재생용 URL 생성 → 오류 구간 재생에 사용
+      // Blob URL 생성: 소절 재생 시 이 URL의 특정 구간을 재생함
+      // (실제 업로드는 WAV로 변환 후 전송하지만, 재생은 원본 WebM 사용)
       onAudioReady?.(URL.createObjectURL(blob));
       uploadAudio(blob);
 
-      // 스트림 트랙 해제
+      // 마이크 스트림 해제 (브라우저 녹음 표시 아이콘 사라짐)
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     };
@@ -171,9 +200,10 @@ export default function VoiceRecorder({ onUploadSuccess, onUploadError, onAudioR
     setRecordingState('recording');
     setStatusMessage('녹음 중... (0:00)');
 
-    // 녹음 타이머
+    // 1초마다 경과 시간 표시 갱신
     timerRef.current = setInterval(() => {
       setStatusMessage((prev) => {
+        // "녹음 중... (M:SS)" 패턴에서 현재 초 파싱
         const current = Number(prev.match(/\((\d+):(\d{2})\)/)?.[1] ?? 0) * 60
           + Number(prev.match(/\((\d+):(\d{2})\)/)?.[2] ?? 0);
         const next = current + 1;
